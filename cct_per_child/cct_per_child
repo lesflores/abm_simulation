@@ -1,0 +1,119 @@
+# =========================
+# 0) Paquetes y semilla
+# =========================
+library(ABM)
+set.seed(1)
+
+# =========================
+# 1) Parámetros del modelo
+# =========================
+N      <- 5000
+Tmax   <- 36
+
+# 💔 transfer_amount <- 600 # Monto nominal mensual ($600)  (ELIMINADO: ahora usamos per-child)
+delay_prob_base <- 0.30
+lambda_cred     <- 0.30
+
+# NEW: esquema tipo paper (beneficio por hijx + elegibilidad por pobreza)
+base_transfer_per_child <- 300   # NEW: monto por hijx (ajusta a tu caso)
+max_children_paid       <- 2     # NEW: límite de hijxs cubiertos
+poverty_line            <- 4500  # NEW: línea de pobreza mensual del hogar
+
+# =====================================
+# 2) Crear simulación y estado inicial
+# =====================================
+sim <- Simulation$new(N)
+
+seedA <- 10
+for (i in 1:N) {
+  theta  <- rnorm(1, mean = 300, sd = 80)
+  cred0  <- 1 - delay_prob_base
+  state0 <- if (i <= seedA) "A" else "N"
+  
+  # NEW: número de hijxs (10–17) potencialmente beneficiarios (aprox simple)
+  n_hijos <- sample(0:3, size = 1, prob = c(0.25, 0.40, 0.25, 0.10), replace = TRUE)
+  
+  # NEW: ingreso del hogar (excluye transfer y salario del menor) ~ lognormal (ajusta a tus datos)
+  Y_hogar <- rlnorm(1, meanlog = log(4000), sdlog = 0.5)
+  
+  # NEW: elegibilidad por pobreza
+  elegible <- (Y_hogar < poverty_line)
+  
+  sim$setState(i, list(
+    state0,
+    theta     = theta,
+    cred      = cred0,
+    n_hijos   = n_hijos,   # NEW
+    Y_hogar   = Y_hogar,   # NEW
+    elegible  = elegible   # NEW
+  ))
+}
+
+# ======================================
+# 3) Loggers (contadores automáticos)
+# ======================================
+sim$addLogger(newCounter("A", "A"))  # cuántos asisten
+sim$addLogger(newCounter("N", "N"))  # cuántos no asisten
+
+# =========================================================
+# 4) Handler mensual (la “dinámica”)
+# =========================================================
+tick_handler <- function(time, sim, agent) {
+  for (i in 1:N) {
+    ai <- getAgent(sim, i)
+    st <- getState(ai)   # st[[1]] = "A"/"N"; atributos: theta, cred, n_hijos, Y_hogar, elegible
+    
+    # 💔  Beneficio esperado este mes: monto * credibilidad percibida (versión monto fijo)
+    # 💔  benefit <- transfer_amount * st$cred
+    
+    # NEW: beneficio por hijx (si elegible), limitado por max_children_paid
+    hijos_cubiertos <- min(st$n_hijos, max_children_paid)                                 # NEW
+    transfer_eff    <- if (st$elegible) base_transfer_per_child * hijos_cubiertos else 0  # NEW
+    benefit         <- transfer_eff * st$cred                                             # CHANGED
+    
+    # Regla de decisión mínima:
+    new_state <- if (benefit >= st$theta) "A" else "N"
+    
+    # Si asiste, “experimento” de pago a tiempo (Bernoulli con p = 1 - delay_prob_base)
+    paid_on_time <- (new_state == "A") && (runif(1) > delay_prob_base)
+    
+    # Actualizar credibilidad (promedio móvil)
+    cred_new <- (1 - lambda_cred) * st$cred + lambda_cred * as.numeric(paid_on_time)
+    
+    # Guardamos nuevo estado + atributos (θ se mantiene fijo en este modelo)
+    setState(ai, list(
+      new_state,
+      theta     = st$theta,
+      cred      = cred_new,
+      n_hijos   = st$n_hijos,   # NEW: persiste
+      Y_hogar   = st$Y_hogar,   # NEW: persiste
+      elegible  = st$elegible   # NEW: persiste
+    ))
+  }
+  
+  if (time < Tmax) schedule(agent, newEvent(time + 1, tick_handler))
+}
+
+# ==============================
+# 5) Ejecutar la simulación
+# ==============================
+schedule(sim$get, newEvent(0, tick_handler))
+res <- sim$run(0:Tmax)     # data.frame: times, A, N
+res$attend <- res$A / N
+
+# ==============================
+# 6) Gráfico
+# ==============================
+library(ggplot2)
+
+p <- ggplot(res, aes(x = times, y = attend)) +
+  geom_area(fill = "yellow2", alpha = 0.12) +
+  geom_line(size = 1.4, color = "orange", lineend = "round") +
+  coord_cartesian(ylim = c(0, 1)) +
+  labs(title = "CCT (elegibilidad por pobreza + transfer por hijx)",
+       x = "Mes", y = "% que asiste") +
+  theme_minimal(base_size = 14)
+
+p
+
+ggsave("asistencia_cct.png", plot = p, width = 8, height = 5, dpi = 300)
