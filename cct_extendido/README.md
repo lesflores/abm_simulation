@@ -82,3 +82,43 @@ new_state <- names(which.max(utilities))`
    - Si el pago llegó, la credibilidad sube.
    - Si se retrasó, baja.
    - Este aprendizaje gradual se controla con lambda_cred.
+  
+# Qué produce el modelo
+
+Cada fila de res es un mes (t = 0, 1, 2, …, 36), y tiene:
+  
+| Columna  | Significado                                     |
+| -------- | ----------------------------------------------- |
+| `times`  | Mes de la simulación                            |
+| `E`      | Hogares con hijxs que solo estudian             |
+| `ET`     | Hogares con hijxs que estudian y trabajan       |
+| `T`      | Hogares con hijxs que solo trabajan             |
+| `attend` | % de hogares con hijxs escolarizados = (E+ET)/N |
+
+# Qué representa la gráfica
+
+Muestra la proporción de hogares con hijxs que estudian (E+ET) a lo largo de los meses.
+
+Interpreta así:
+
+- Si la línea sube - > más hogares eligen la escuela (mejor desempeño educativo).
+
+- Si baja - > más hogares abandonan la escuela o eligen solo trabajo.
+
+- Si se estabiliza - >  equilibrio del sistema (steady state).
+
+Es un modelo basado en agentes donde los hogares:
+
+- Aprenden y ajustan su confianza en el programa (credibilidad);
+
+- Deciden racionalmente entre educación y trabajo infantil según:
+
+    - montos de beca,
+    - ingresos,
+    - costos,
+    - credibilidad,
+y contexto rural/urbano.
+
+📌 En palabras simples:
+
+Estás reproduciendo, a nivel micro, cómo un programa de transferencias condicionadas puede modificar las tasas de escolarización y trabajo infantil bajo distintos escenarios socioeconómicos.
