@@ -117,8 +117,6 @@ Es un modelo basado en agentes donde los hogares:
     - ingresos,
     - costos,
     - credibilidad,
-y contexto rural/urbano.
+    - y contexto rural/urbano.
 
-📌 En palabras simples:
-
-Estás reproduciendo, a nivel micro, cómo un programa de transferencias condicionadas puede modificar las tasas de escolarización y trabajo infantil bajo distintos escenarios socioeconómicos.
+Se está reproduciendo, a nivel micro, cómo un programa de transferencias condicionadas puede modificar las tasas de escolarización y trabajo infantil bajo distintos escenarios socioeconómicos.
