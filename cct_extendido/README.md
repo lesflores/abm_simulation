@@ -64,6 +64,16 @@ Es decir:
 
 El beneficio depende del número de hijxs, pero solo si son pobres y cumplen la asistencia.
 
+hasta aquí: 
+
+| Categoría      | Parámetro                                                      | Sig                                 |
+| -------------- | -------------------------------------------------------------- | ----------------------------------- |
+| Escenario      | `N`, `Tmax`                                                    | Tamaño y duración                   |
+| Programa       | `base_transfer_per_child`, `max_children_paid`, `poverty_line` | Diseño de la transferencia          |
+| Comportamiento | `delay_prob_base`, `lambda_cred`                               | Credibilidad y cumplimiento         |
+| Socioeconómico | `beta_age`, `beta_school`, `cost_school`, `urban_penalty`      | Determinantes de salario y decisión |
+
+
 ## 3. Características del hogar
 
 Cada hogar tiene atributos que afectan sus decisiones:
