@@ -136,9 +136,20 @@ tick_handler <- function(time, sim, agent) {  # Es una función que el motor de 
     
     # ----- Utilidades de las tres opciones -----
     # NUEVO: utilidades de tres opciones (E=solo escuela, ET=escuela y trabajo, T=solo trabajo)
-    U_E  <- transfer_eff * st$cred - cost_school                   # recibe toda la transferencia (si llega a tiempo) pero paga el costo escolar.
-    U_ET <- (transfer_eff/2) + (w_child * 0.5) - (cost_school/2)   # recibe mitad de la transferencia y gana mitad del salario (supongamos que es por trabajar medio tiempo). 
-    U_T  <- w_child                                                # no recibe apoyo ni paga escuela, pero obtiene todo el salario.
+    U_E  <- (transfer_eff * st$cred) - cost_school   -   st$theta
+    # E (solo escuela): recibe toda la transferencia esperada (ajustada por credibilidad),
+    # paga el costo completo de asistir (cost_school),
+    # y enfrenta toda la barrera de asistencia (theta), que es mayor en zonas rurales.
+    U_ET <- (transfer_eff/2) + (w_child * 0.5) - (cost_school/2)  - (0.5*st$theta)  
+    # ET (escuela + trabajo): combina ambas actividades a medio tiempo.
+    # Recibe solo la mitad de la transferencia (por asistencia parcial),
+    # gana la mitad del salario (media jornada laboral),
+    # paga la mitad del costo escolar,
+    # y enfrenta solo la mitad de la barrera (theta), 
+    # pues asiste parcialmente a la escuela y su logística es menos exigente.
+    U_T  <- w_child
+    # T (solo trabajo): no recibe transferencia ni paga costo escolar,
+    # pero obtiene todo el salario potencial del trabajo.
     
     # ----- Decisión del hogar -----
     utilities <- c(E = U_E, ET = U_ET, T = U_T)  # junta las tres utilidades en un vector.
@@ -204,5 +215,3 @@ p <- ggplot(res, aes(x = times, y = attend)) +
   theme_minimal(base_size = 14)
 
 p
-
-ggsave("asistencia_cct_extendido.png", plot = p, width = 8, height = 5, dpi = 300)
