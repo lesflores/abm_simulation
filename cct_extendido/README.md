@@ -3,15 +3,50 @@
 ## Estructura
 **1. setState:**
 
-   - **Qué hace:** crea cada agente y le asigna estado y atributos (lo que va a cargar durante toda la simulación). En el código: dentro del for (i in 1:N) se llama a
+**Qué hace:** crea cada agente y le asigna estado y atributos (lo que va a cargar durante toda la simulación). En el código: dentro del for (i in 1:N) se llama a
 
 `sim$setState(i, list(state0, theta=..., cred=..., n_hijos=..., ...))`
 
 El primer elemento de la lista es el estado (“E”, “ET” o “T”). El resto son atributos (θ, credibilidad, zona, edad, etc.).
 
-2. addLogger
-4. tick_handler
-5. scheduler
+**2. addLogger:**
+
+**Qué hace:** conecta sensores al simulador. Son funciones que, en cada tiempo, calculan y guardan métricas (conteos, medias, etc.). En el código:
+
+`sim$addLogger(newCounter("E", "E"))
+sim$addLogger(newCounter("ET", "ET"))
+sim$addLogger(newCounter("T", "T"))`
+
+Cada uno contará cuántos agentes están en ese estado en cada mes.
+
+**Resultado:** cuando termina run, se obtiene un data frame `res` con columnas times, E, ET, T (etc..).
+
+**4. tick_handler:** 
+
+**Qué hace:** es la regla de actualización. Aquí se define cómo pasan las cosas del mes *t* al mes *t+1.* En el código:
+
+Se Recorren agentes `(for (i in 1:N)),` se lee su estado/atributos `(getState),` se calcula utilidades `U_E, U_ET, U_T,` se elige el `new_state,` se actualiza `cred (EMA),` y se guarda con `setState(ai, list(new_state, ...)).`Qué hace: agenda eventos para que el motor llame tu tick_handler en los tiempos que tú digas.
+
+En tu código hay dos niveles:
+
+Primera patada de arranque (antes de correr):
+
+schedule(sim, newEvent(0, tick_handler))
+Esto dice: en el tiempo 0, llama a tick_handler.
+
+Auto-reagendado dentro del handler:
+
+if (time < Tmax) schedule(agent, newEvent(time + 1, tick_handler))
+Eso crea el bucle temporal: cuando termina el tick t, programa el tick t+1 (hasta Tmax).
+
+Diferencia sim vs agent: en la patada inicial usas sim; dentro del handler usas agent (el scheduler interno que el motor te pasa) para re-agendarte sin salir de la función.
+
+Aquí ocurre la inteligencia del modelo (decisión E/ET/T + aprendizaje de credibilidad).
+
+**Patrón mental:** *leer* - > *decidir* - > *escribir* para cada agente, en cada tick.
+
+**5. scheduler**
+
 6. run
 
 # Propósito del modelo
