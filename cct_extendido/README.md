@@ -23,7 +23,7 @@ dependiendo de los incentivos del programa, los costos, los ingresos, la credibi
 
 - `max_children_paid = 2:` si tienen más hijxs, solo 2 reciben el pago (como límite de apoyo).
 
-`poverty_line = 4500:` solo hogares con ingreso menor a esta línea son elegibles.
+- `poverty_line = 4500:` solo hogares con ingreso menor a esta línea son elegibles.
 
 Es decir:
 
