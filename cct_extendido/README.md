@@ -1,3 +1,19 @@
+# Código AMB - CCT extendido 
+
+## Estructura
+**1. setState:**
+
+   - **Qué hace:** crea cada agente y le asigna estado y atributos (lo que va a cargar durante toda la simulación). En el código: dentro del for (i in 1:N) se llama a
+
+`sim$setState(i, list(state0, theta=..., cred=..., n_hijos=..., ...))`
+
+El primer elemento de la lista es el estado (“E”, “ET” o “T”). El resto son atributos (θ, credibilidad, zona, edad, etc.).
+
+2. addLogger
+4. tick_handler
+5. scheduler
+6. run
+
 # Propósito del modelo
 
 **Cómo los hogares deciden cada mes si:**
