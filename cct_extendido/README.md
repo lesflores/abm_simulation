@@ -3,7 +3,7 @@
 ## Estructura
 **1. setState:**
 
-**Qué hace:** crea cada agente y le asigna estado y atributos (lo que va a cargar durante toda la simulación). En el código: dentro del for (i in 1:N) se llama a
+**Qué hace:** crea cada agente y le asigna estado y atributos (lo que va a cargar durante toda la simulación). En el código: dentro del for (i in 1:N) se llama a:
 
 `sim$setState(i, list(state0, theta=..., cred=..., n_hijos=..., ...))`
 
