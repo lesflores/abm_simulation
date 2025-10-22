@@ -64,7 +64,7 @@ Es decir:
 
 El beneficio depende del número de hijxs, pero solo si son pobres y cumplen la asistencia.
 
-hasta aquí: 
+### hasta aquí: 
 
 | Categoría      | Parámetro                                                      | Sig                                 |
 | -------------- | -------------------------------------------------------------- | ----------------------------------- |
