@@ -19,7 +19,7 @@ Cada uno contará cuántos agentes están en ese estado en cada mes.
 
 **4. tick_handler:** Es la regla de actualización. Aquí se define cómo pasan las cosas del mes *t* al mes *t+1.* En el código:
 
-Se Recorren agentes `(for (i in 1:N)),` se lee estado/atributos `(getState),` se calcula utilidades `U_E, U_ET, U_T,` se elige el `new_state,` se actualiza `cred (EMA),` y se guarda con `setState(ai, list(new_state, ...)).`Qué hace: agenda eventos para que el motor llame tu tick_handler en los tiempos que tú digas.
+Se Recorren agentes `(for (i in 1:N)),` se lee estado/atributos `(getState),` se calcula utilidades `U_E, U_ET, U_T,` se elige el `new_state,` se actualiza `cred (EMA),` y se guarda con `setState(ai, list(new_state, ...)).`
 
 Aquí ocurre la inteligencia del modelo (decisión E/ET/T + aprendizaje de credibilidad).
 
@@ -31,7 +31,7 @@ Aquí ocurre la inteligencia del modelo (decisión E/ET/T + aprendizaje de credi
 
 `res <- sim$run(0:Tmax)`
 
-El resultado `res` es una serie temporal con lo que los `loggers` midieron en cada mes `(E, ET, T,` etc.). Luego se crean métricas derivadas como `attend, rate_E,` etc.
+🚩 El resultado `res` es una serie temporal con lo que los `loggers` midieron en cada mes `(E, ET, T,` etc.). Luego se crean métricas derivadas como `attend, rate_E,` etc.
 
 # Propósito del modelo
 
