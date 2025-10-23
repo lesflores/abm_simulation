@@ -15,7 +15,6 @@ El objetivo es analizar cómo **la elegibilidad, la credibilidad del programa, l
 
 El modelo usa:
 
-```r
 library(ABM)
 library(dplyr)
 library(ggplot2)
@@ -75,7 +74,6 @@ Cada mes se genera `p_public_tick ∈ [0,1]`, la puntualidad promedio del progra
 
 Los hogares rurales perciben entre **5 y 25 p.p. menos de puntualidad**:
 
-```r
 p_public <- if (st$zona == "rural") p_public_tick - 0.25 else p_public_tick
 
 ## b) Utilidades de Cada Opción
@@ -94,7 +92,6 @@ Cada hogar calcula la utilidad esperada de tres decisiones posibles:
 
 En lugar de que todos elijan la opción con mayor utilidad (`which.max()`), se usa una elección probabilística tipo **logit/softmax**:
 
-```r
 tau <- 200
 u_center <- utilities - max(utilities)
 probs <- exp(u_center / tau)
@@ -110,7 +107,6 @@ new_state <- sample(c("E", "ET", "T"), size = 1, prob = probs)
 
 El comando:
 
-```r
 sample(..., prob = probs)
 
 
@@ -127,7 +123,6 @@ sample(..., prob = probs)
 
 La credibilidad (`cred`) se ajusta según la experiencia del hogar:
 
-```r
 if (new_state %in% c("E", "ET") && st$elegible) {
   paid_on_time <- runif(1) < p_public
   cred_new <- (1 - lambda_cred) * st$cred + lambda_cred * as.numeric(paid_on_time)
