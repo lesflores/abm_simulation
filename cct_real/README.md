@@ -46,6 +46,7 @@ Esto introduce **heterogeneidad inicial**, clave para evitar comportamientos id�
 Cada hogar se carga como un agente con su propio estado y atributos mediante:
 
 `sim <- Simulation$new(N)`
+
 `sim$setState(i, list(...))`
 
 # 4) Dinámica Mensual (`tick_handler`)
@@ -84,9 +85,13 @@ Cada hogar calcula la utilidad esperada de tres decisiones posibles:
 En lugar de que todos elijan la opción con mayor utilidad (`which.max()`), se usa una elección probabilística tipo **logit/softmax**:
 
 `tau <- 200`
+
 `u_center <- utilities - max(utilities)`
+
 `probs <- exp(u_center / tau)`
+
 `probs <- probs / sum(probs)`
+
 `new_state <- sample(c("E", "ET", "T"), size = 1, prob = probs)`
 
 ### Interpretación del parámetro `tau`
@@ -140,11 +145,15 @@ Luego, la función reagenda el siguiente mes:
 Se agregan contadores y se corre la simulación:
 
 `sim$addLogger(newCounter("E", "E"))`
+
 `sim$addLogger(newCounter("ET", "ET"))`
+
 `sim$addLogger(newCounter("T", "T"))`
 
 `schedule(sim$get, newEvent(0, tick_handler))`
+
 `res <- sim$run(0:Tmax)`
+
 `res$attend <- (res$E + res$ET) / N`
 
 ## Interpretación
