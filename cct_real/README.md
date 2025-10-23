@@ -1,6 +1,7 @@
 # Modelo ABM de Decisión Educativa con Transferencias Condicionadas
 
 Este modelo basado en agentes (ABM) simula la **decisión mensual de los hogares** sobre la asistencia escolar de niñxs en el contexto de un programa de transferencias condicionadas.  
+
 Cada hogar decide entre tres opciones:
 
 -  **E**: Solo escuela  
@@ -44,8 +45,8 @@ Esto introduce **heterogeneidad inicial**, clave para evitar comportamientos id�
 
 Cada hogar se carga como un agente con su propio estado y atributos mediante:
 
-`sim <- Simulation$new(N)
-sim$setState(i, list(...))`
+`sim <- Simulation$new(N)`
+`sim$setState(i, list(...))`
 
 # 4) Dinámica Mensual (`tick_handler`)
 
@@ -82,18 +83,18 @@ Cada hogar calcula la utilidad esperada de tres decisiones posibles:
 
 En lugar de que todos elijan la opción con mayor utilidad (`which.max()`), se usa una elección probabilística tipo **logit/softmax**:
 
-`tau <- 200
-u_center <- utilities - max(utilities)
-probs <- exp(u_center / tau)
-probs <- probs / sum(probs)
-new_state <- sample(c("E", "ET", "T"), size = 1, prob = probs)`
+`tau <- 200`
+`u_center <- utilities - max(utilities)`
+`probs <- exp(u_center / tau)`
+`probs <- probs / sum(probs)`
+`new_state <- sample(c("E", "ET", "T"), size = 1, prob = probs)`
 
 ### Interpretación del parámetro `tau`
 
 `tau` controla la **“temperatura”** o nivel de aleatoriedad en las decisiones:
 
-- τ **pequeño** → decisiones más deterministas.  
-- τ **grande** → más mezcla y variabilidad.  
+- τ **pequeño**: decisiones más deterministas.  
+- τ **grande**: más mezcla y variabilidad.  
 
 El comando:
 
@@ -113,12 +114,12 @@ El comando:
 
 La credibilidad (`cred`) se ajusta según la experiencia del hogar:
 
-if (new_state %in% c("E", "ET") && st$elegible) {
+`if (new_state %in% c("E", "ET") && st$elegible) {
   paid_on_time <- runif(1) < p_public
   cred_new <- (1 - lambda_cred) * st$cred + lambda_cred * as.numeric(paid_on_time)
 } else {
   cred_new <- (1 - lambda_cred) * st$cred + lambda_cred * p_public_tick
-}
+}`
 
 ### Actualización de la Credibilidad
 
@@ -138,13 +139,13 @@ Luego, la función reagenda el siguiente mes:
 
 Se agregan contadores y se corre la simulación:
 
-`sim$addLogger(newCounter("E", "E"))
-sim$addLogger(newCounter("ET", "ET"))
-sim$addLogger(newCounter("T", "T"))
+`sim$addLogger(newCounter("E", "E"))`
+`sim$addLogger(newCounter("ET", "ET"))`
+`sim$addLogger(newCounter("T", "T"))`
 
-schedule(sim$get, newEvent(0, tick_handler))
-res <- sim$run(0:Tmax)
-res$attend <- (res$E + res$ET) / N`
+`schedule(sim$get, newEvent(0, tick_handler))`
+`res <- sim$run(0:Tmax)`
+`res$attend <- (res$E + res$ET) / N`
 
 ## Interpretación
 
@@ -168,5 +169,3 @@ Permite explorar políticas como:
 - Incrementos temporales en la puntualidad.  
 - Choques negativos (*crisis presupuestal*).  
 - Diferencias de respuesta según zona o ingreso.
-
-
