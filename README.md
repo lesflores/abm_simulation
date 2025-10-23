@@ -7,3 +7,7 @@
 ## Ex ante impact assessment of conditional cash transfer programs using an agent-based model:
 
 🔗 https://www.researchgate.net/publication/319472297_Ex_ante_impact_assessment_of_conditional_cash_transfer_programs_using_an_agent-based_model
+
+## Protocolo ODD
+
+🔗 https://www.jasss.org/23/2/7.html
