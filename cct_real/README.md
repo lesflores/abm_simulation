@@ -11,16 +11,7 @@ El objetivo es analizar cómo **la elegibilidad, la credibilidad del programa, l
 
 ---
 
-##  0) Paquetes y Datos
-
-El modelo usa:
-
-library(ABM)
-library(dplyr)
-library(ggplot2)
-library(readxl)
-
-# ⚙️ 1) Parámetros del Programa
+# 1) Parámetros del Programa
 
 Los parámetros controlan el diseño del programa y el entorno de simulación:
 
@@ -53,9 +44,8 @@ Esto introduce **heterogeneidad inicial**, clave para evitar comportamientos id�
 
 Cada hogar se carga como un agente con su propio estado y atributos mediante:
 
-```r
-sim <- Simulation$new(N)
-sim$setState(i, list(...))
+`sim <- Simulation$new(N)
+sim$setState(i, list(...))`
 
 # 4) Dinámica Mensual (`tick_handler`)
 
@@ -74,7 +64,7 @@ Cada mes se genera `p_public_tick ∈ [0,1]`, la puntualidad promedio del progra
 
 Los hogares rurales perciben entre **5 y 25 p.p. menos de puntualidad**:
 
-p_public <- if (st$zona == "rural") p_public_tick - 0.25 else p_public_tick
+`p_public <- if (st$zona == "rural") p_public_tick - 0.25 else p_public_tick`
 
 ## b) Utilidades de Cada Opción
 
@@ -92,11 +82,11 @@ Cada hogar calcula la utilidad esperada de tres decisiones posibles:
 
 En lugar de que todos elijan la opción con mayor utilidad (`which.max()`), se usa una elección probabilística tipo **logit/softmax**:
 
-tau <- 200
+`tau <- 200
 u_center <- utilities - max(utilities)
 probs <- exp(u_center / tau)
 probs <- probs / sum(probs)
-new_state <- sample(c("E", "ET", "T"), size = 1, prob = probs)
+new_state <- sample(c("E", "ET", "T"), size = 1, prob = probs)`
 
 ### Interpretación del parámetro `tau`
 
@@ -107,7 +97,7 @@ new_state <- sample(c("E", "ET", "T"), size = 1, prob = probs)
 
 El comando:
 
-sample(..., prob = probs)
+`sample(..., prob = probs)`
 
 
 ### Control de la Temperatura (`tau`)
@@ -142,21 +132,19 @@ if (new_state %in% c("E", "ET") && st$elegible) {
 Cada agente actualiza su estado (`E`, `ET` o `T`) y sus atributos persistentes (edad, zona, etc.).  
 Luego, la función reagenda el siguiente mes:
 
-```r
-if (time < Tmax) schedule(agent, newEvent(time + 1, tick_handler))
+`if (time < Tmax) schedule(agent, newEvent(time + 1, tick_handler))`
 
 ## 5) Ejecución
 
 Se agregan contadores y se corre la simulación:
 
-```r
-sim$addLogger(newCounter("E", "E"))
+`sim$addLogger(newCounter("E", "E"))
 sim$addLogger(newCounter("ET", "ET"))
 sim$addLogger(newCounter("T", "T"))
 
 schedule(sim$get, newEvent(0, tick_handler))
 res <- sim$run(0:Tmax)
-res$attend <- (res$E + res$ET) / N
+res$attend <- (res$E + res$ET) / N`
 
 ## Interpretación
 
