@@ -53,21 +53,6 @@ Evaluar cómo los **parámetros de política pública** (subsidio, puntualidad, 
 
 ---
 
-## Indicadores de calibración
-
-Para validar el modelo, se propone minimizar una función de pérdida ponderada entre datos simulados y observados:
-
-\[
-L = 0.7\,|\text{esc\_sim} - \text{esc\_obs}| + 0.3\,|\text{asis\_sim} - \text{asis\_obs}|
-\]
-
-donde:
-- `esc_sim`: escolaridad promedio simulada.
-- `esc_obs`: escolaridad promedio observada.
-- `asis_obs`: proporción observada de asistencia escolar.
-
----
-
 ## Estructura del código
 
 1. **Paquetes y datos:** carga de librerías y base real (`hogares_base.xlsx`).
