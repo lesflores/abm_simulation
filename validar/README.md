@@ -1,6 +1,6 @@
-# Validación del Modelo Basado en Agentes (ABM) para Programas de Transferencias Condicionadas
+# Validación del ABM para Programas de Transferencias Condicionadas
 
-Este documento describe **el proceso de validación empírica** aplicado al modelo basado en agentes (ABM) que simula las decisiones educativas de los hogares bajo esquemas de transferencias condicionadas (CCT).  
+Este documento describe **el proceso de validación empírica** aplicado al ABM que simula las decisiones educativas de los hogares bajo esquemas de transferencias condicionadas (CCT).  
 
 El objetivo de la validación es verificar **qué tan bien el modelo reproduce los patrones observados en los datos reales** y si sus resultados generalizan más allá del conjunto de calibración.
 
