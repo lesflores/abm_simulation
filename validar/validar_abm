@@ -29,10 +29,6 @@ escenarios <- expand.grid(
 
 resultados_train <- data.frame()
 
-# ⚠️ Antes de iniciar, asegúrate de tener tick_handler y params definidos igual que en tu modelo base.
-#     (no los metas dentro de funciones: deben existir en el entorno global)
-#     params debe actualizarse dentro del bucle.
-
 # =========================
 # 4) Bucle de calibración (train)
 # =========================
