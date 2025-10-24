@@ -1,0 +1,402 @@
+# =========================
+# 0) Paquetes y datos
+# =========================
+
+library(ABM)
+library(dplyr)     # para crear columna derivadas
+library(ggplot2)
+library(readxl)
+
+# Leer base real
+hogares <- read_excel("hogares_base.xlsx")
+head(hogares)
+
+
+# ============================
+# 1) Parámetros y diseño del programa de transferencias
+# ============================
+
+# --- Elegibilidad y subsidio ---
+umbral_educ <- 0.4        # hogares con educación parental < 0.4 son elegibles. 
+                          # Regla para decidir quién recibe apoyo: si la educación de madres/padres < 0.4, sí es elegible. (0=sin escolaridad, 1=muy alta).
+                          # Si se sube: más hogares califican.
+                          # Si se baja: menos hogares califican
+subsidy_base <- 500       # monto mensual de la transferencia
+
+# --- Credibilidad y aprendizaje ---
+delay_prob_base <- 0.25   # probabilidad base de que el pago del programa llegue tarde (25%)
+lambda_cred <- 0.20       # velocidad de ajuste de credibilidad (memoria).
+                          # Controla qué tanto se ajusta la confianza según la experiencia reciente:
+                          # - Si lambda_cred = 1, el hogar olvida todo el pasado y solo cuenta el último pago.
+                          # - Si lambda_cred = 0, nunca cambia su credibilidad (memoria infinita).
+                          # - 0.30 significa que se ajusta 30% a lo nuevo y conserva 70% del valor anterior.
+
+# --- Decisión y ruido ---
+tau <- 200                # temperatura de decisión (suaviza las elecciones).
+                          # - tau chico:  casi siempre gana la mejor (se parece al argmax).
+                          # - tau grande: más mezcla; las segundas mejores también se eligen a veces.
+sigma_noise <- 0.05       # variación aleatoria de percepción (ruido Gumbel). Ruido aleatorio en cómo cambia la escolaridad de las/los hijos (pequeñas sorpresas buenas/malas).
+
+# --- Estacionalidad (si quieres mantener la estructura del modelo base) ---
+season_vec <- c(
+  0.00,  0.00, -0.03, -0.03,  # ene, feb, mar, abr
+  0.00,  0.02,  0.02,  0.00,  # may, jun, jul, ago
+  -0.02, -0.02,  0.00,  0.00  # sep, oct, nov, dic
+)
+
+# Es un vector de 12 números, uno por mes (enero a diciembre).
+# Cada número es un ajuste en puntos de probabilidad sobre la puntualidad del programa ese mes.
+# -0.03 = restar 3 puntos porcentuales a la puntualidad.
+# +0.02 = sumar 2 puntos porcentuales.
+# 0.00 = sin cambio estacional.
+
+# --- Contenedor para facilitar acceso dentro del tick_handler ---
+params <- list(
+  tau = tau,
+  lambda_cred = lambda_cred,
+  delay_prob_base = delay_prob_base,
+  subsidy_base = subsidy_base,
+  umbral_educ = umbral_educ,
+  sigma_noise = sigma_noise,
+  season_vec = season_vec
+)
+
+# Es solo un contenedor para tener todos los parámetros juntitos y que el tick_handler los lea como params$algo. 
+# Así evitas pasar 8-10 argumentos a la función y, además, puedes cambiar escenarios modificando params$... antes de cada corrida.
+
+# =========================
+# 2) Construcción de variables derivadas (heterogeneidad inicial)
+# =========================
+
+hogares <- hogares %>%
+  mutate(
+    elegible_policy = educ_padres_madres < umbral_educ,         # marca como TRUE/FALSE si el hogar es elegible según la educación parental (por debajo del umbral).
+                                                                # Modela una regla de focalización: menos educación parental - > elegible.
+                                                                # Credibilidad inicial (basada en confianza o valor medio si no existe)
+    cred0 =  1 - delay_prob_base,                               # el hogar arranca creyendo que 75% de las veces el pago llega puntual.
+        theta = ifelse(zona == "rural",                         # Barrera de inversión educativa (theta) por contexto
+                   rnorm(n(), mean = 0.35, sd = 0.1),
+                   rnorm(n(), mean = 0.25, sd = 0.1)),
+    salario_pot = exp(log(100) + 1.5 * escolaridad_hijxs + rnorm(n(), 0, 0.2)), # Retorno esperado de la educación (tipo Mincer)
+                                                                                # hogares con mayor escolaridad de hijas/os perciben mayor retorno futuro: favorece invertir.
+    state0 = case_when(                                   # Estado inicial: nivel de inversión educativa (Baja, Media, Alta)
+      escolaridad_hijxs < 0.3 ~ "B",        
+      escolaridad_hijxs < 0.6 ~ "M",
+      TRUE ~ "A"
+    )
+  )
+
+head(hogares)
+
+
+# Estas columnas no simulan nada aún; solo preparan la heterogeneidad inicial que luego usará tu simulación ABM (en el tick_handler) para decidir mes a mes.
+
+# Las cargas a cada agente con setState(...).
+# El tick_handler las usa para calcular utilidades y actualizar el estado/credibilidad mes a mes.
+
+# =========================
+# 3) Crear simulación usando la base
+# =========================
+
+N <- nrow(hogares)             # Define cuántos agentes habrá en el mundo simulado (uno por fila de hogares, en esta versión).
+Tmax <- 30                     # número de periodos simulados
+sim <- Simulation$new(N)       # Crea el objeto simulación con capacidad para N agentes.
+
+for (i in 1:N) {               # Inicia un bucle que va del agente 1 al N. i es el índice del agente (ID interno en sim)
+  sim$setState(                # Asigna el estado y atributos del agente i.
+    i,
+    list(
+      hogares$state0[i],
+      theta       = hogares$theta[i],
+      cred        = hogares$cred0[i],
+      educ_padres = hogares$educ_padres_madres[i],
+      educ_hijo   = hogares$escolaridad_hijxs[i],
+      ingreso     = hogares$ingreso_hogar[i],
+      elegible    = hogares$elegible_policy[i],
+      zona        = hogares$zona[i]
+    )
+  )
+}
+
+# Importante: aquí no hay dinámica todavía. Solo estamos instalando el agente con su estado y mochila de atributos. 
+# La dinámica vendrá luego en tu tick_handler (donde mes a mes cambias estado, actualizas cred, etc.).
+
+# =========================
+# 4) Dinámica del modelo
+# =========================
+# p_public: Cada mes es qué tan puntual fue el programa ese mes en promedio, un número entre 0 y 1, donde 1 = 100% puntual.
+# Ese número sale de sumar cuatro ideas:
+# - Nivel base: lo normal del programa si nada cambia (por ejemplo, 0.70 si suele cumplir 70%).
+# - Estacionalidad (season_vec): meses donde es peor (resta puntos) o mejor (suma puntos) por razones del calendario.
+# - Política puntual (policy_eff): una mejora temporal (por ejemplo, durante 4 meses sube 10 puntos porcentuales).
+# - Ruido del mes (shock_eff): lo impredecible (un poquito para arriba o abajo).
+# Después se recorta, que quede entre 0 y 1 (para que siga siendo una probabilidad válida).
+
+tick_handler <- function(time, sim, agent) {            # Esta función se ejecutará una vez por cada unidad de tiempo (tick) en la simulación. El modelo ABM la volverá a llamar automáticamente en cada paso.
+                                                        # recibe tres cosas: time: el mes actual (0, 1, 2, …, 36), sim: el objeto de simulación (donde viven los agentes), agent: el programador interno del motor (para reagendar el siguiente tick).
+  t <- as.integer(time)                                 # asegura que sea entero
+
+  # --- 1. Puntualidad pública del mes / generación ---
+  season_eff <- params$season_vec[(t %% 12) + 1]        # Estacionalidad según el mes (repite cada 12 ticks)
+  policy_eff <- if (t >= 12 && t <= 15) 0.10 else 0     # Ventana de mejora (ej. meses 12–15 sube 10 p.p.)
+  shock_eff  <- rnorm(1, mean = 0, sd = 0.02)           # Ruido aleatorio (variación natural)
+  base_pub <- 1 - params$delay_prob_base                # Puntualidad pública del mes (en [0,1])
+  p_public_tick <- max(0, min(1, base_pub + season_eff + policy_eff + shock_eff))
+  
+  # --- 2. Iterar sobre los agentes ---
+  for (i in 1:N) {                                # recorre los N hogares.
+    ai <- getAgent(sim, i)                        # trae al agente i. Obtiene todos sus atributos guardados (estado, cred, edad, n_hijos, etc.).
+    st <- getState(ai)                            # el nombre de una variable para guardar lo que devuelve getState(ai)
+    
+    # ai el agente que estoy manipulando
+    # st los datos actuales de ese agente
+    
+    # --- Ajuste de puntualidad percibida (peor en rural -15%) ---
+    p_public <- if (st$zona == "rural") 
+      max(0, min(1, p_public_tick - 0.15)) else p_public_tick
+    
+    # --- 3. Subsidio efectivo (según elegibilidad y credibilidad) ---
+    #     Conecta política con confianza: si el programa falla (retrasos), 
+    #     el valor esperado cae automáticamente (vía cred), y por tanto también cae la inversión educativa.
+    #     Si el hogar no es elegible: subsidy_eff = 0.
+    #     Si sí es elegible: calcula cuánto vale el subsidio para ese hogar en ese mes.
+    #     Cálculo del valor efectivo (cuando es elegible)
+    #     Se multiplican tres factores:
+    #     params$subsidy_base: el tamaño nominal del apoyo (p. ej., $500).
+    #     st$cred (credibilidad en [0,1]): si el programa sí cumple, el hogar espera efectivamente recibir el apoyo; si la cred cae (por retrasos), el valor esperado baja.
+    #     (1 - st$educ_padres): focaliza más a quienes tienen menor educación parental. Por ejemplo: si educ_padres = 0.3 (baja), el factor es 0.7; si educ_padres = 0.9 (alta), el factor es 0.1.
+    #     Así, el mismo programa pega más donde hay más rezago educativo.
+    #     Si el programa falla (retrasos), la gente confía menos - > cae el valor esperado -> baja la inversión educativa.
+    #     subsidy_eff (alto) (más credibilidad y focalización) -> suben U_A y U_M (no U_B).
+    subsidy_eff <- if (st$elegible) 
+      params$subsidy_base * st$cred * (1 - st$educ_padres) else 0
+    
+    # --- 4. Retorno educativo esperado (tipo Mincer) ---
+    #     Mide el beneficio futuro de invertir en educación.
+    #     Cuanta más escolaridad tenga el hijo/a, mayor es el retorno percibido
+    w_return <- exp(1 + 2 * st$educ_hijo)
+    
+    # --- 5. Utilidades de las tres opciones (CCT clásico) ---
+    # B = baja inversión (sin subsidio)
+    # M = inversión media (subsidio parcial + retorno parcial)
+    # A = inversión alta (subsidio completo + retorno completo)
+    
+    U_B <- 0                               - (0.10 + st$theta)  # theta es el freno no monetario: cuanto mayor es, más difícil que el hogar elija M/A, incluso con subsidio y buen retorno.
+    U_M <- 0.5*subsidy_eff + 0.5*w_return  - (0.20 + st$theta)
+    U_A <- 1.0*subsidy_eff + 1.0*w_return  - (0.30 + st$theta)
+    
+    utilities <- c(B = U_B, M = U_M, A = U_A)
+    
+    
+    # --- 6. Softmax decision (con temperatura tau) ---
+    tau <- params$tau
+    u_center <- utilities - max(utilities) # estabilidad numérica: restar la mayor utilidad antes de exp. 
+    # Las utilidades pueden ser grandes (por ejemplo, 20000 pesos).
+    # Al aplicar una exponencial (exp()), esos números se disparan.
+    # Entonces, restar el máximo solo centra los valores:
+    
+    probs <- exp(u_center / tau)           # Convierte utilidades en pesos positivos con exp(…/tau).
+    # toma cada utilidad centrada (u_center) y la transforma en un peso positivo usando la exponencial.
+    # Por qué exponencial: garantiza que todos los pesos sean > 0 (nunca negativos). 
+    # Además, una utilidad un poco mayor se vuelve mucho mayor tras exp, así que las opciones mejores reciben más peso.
+    # Rol de tau: es la temperatura. Divide las utilidades para suavizar o acentuar diferencias:
+    # - tau grande - > diferencias se achican - > pesos más parecidos.
+    # - tau chico - > diferencias se agrandan -> el peso de la mejor domina.
+    
+    probs <- probs / sum(probs)            # convierte esos pesos en probabilidades dividiendo por su suma.
+    # Resultado de ahora sum(probs) = 1, y cada probs[j] está entre 0 y 1 - > ya son probabilidades válidas.
+    # La opción con mayor utilidad tenía el mayor peso exp, y al normalizar sigue con la probabilidad más alta, 
+    # pero las demás no quedan en cero. 
+    
+    new_state <- sample(c("B","M","A"), size = 1, prob = probs)  # elección según esas probabilidades
+    
+    # --- 7. Actualización de credibilidad (aprendizaje) ---
+    lambda_local <- params$lambda_cred
+    
+    if (st$elegible) {
+      paid_on_time <- runif(1) < p_public
+      cred_new <- (1 - lambda_local) * st$cred + lambda_local * as.numeric(paid_on_time)
+    } else {
+      cred_new <- (1 - lambda_local) * st$cred + lambda_local * p_public_tick
+    }
+    
+    # Cada hogar actualiza su confianza (cred) en función de la experiencia del periodo.
+    # Si es elegible, su credibilidad depende de si le pagaron puntual (Bernoulli con probabilidad p_public).
+    # Si no es elegible, ajusta su credibilidad según la puntualidad general (p_public_tick), como un observador externo.
+    # La memoria (lambda_local) regula cuánto influye lo nuevo.
+      
+    # --- 8. Actualización educativa intergeneracional ---
+    #     actualiza la escolaridad del/la hijo/a para el siguiente periodo, 
+    #     según la decisión tomada (B/M/A) y con un poco de azar.
+    #     La educación de madres/padres es el piso desde el cual arrancará la nueva generación (las hijas/os).
+    #     Dependiendo de la decisión del hogar en esta generación:
+    #     Alta inversión (A) suma +0.10
+    #     Media (M) suma +0.05
+    #     Baja (B) suma +0.02
+    #     las políticas (vía subsidio/credibilidad) empujan a elegir M o A, y esa elección aumenta el nivel educativo de la generación que viene.
+    #     + rnorm(1, 0, sigma_noise) Hay factores imprevisibles (salud, migración, maestrxs, clima, etc.).
+    #     max-min escala normalizada
+    educ_next <- st$educ_padres + 
+      ifelse(new_state == "A", 0.10,
+             ifelse(new_state == "M", 0.05, 0.02)) + 
+      rnorm(1, 0, params$sigma_noise)
+    educ_next <- max(0, min(1, educ_next))
+    
+    # --- 9. Guardar nuevo estado y atributos ---
+    setState(ai, list(
+      new_state,
+      theta       = st$theta,
+      cred        = cred_new,
+      educ_padres = st$educ_padres,
+      educ_hijo   = educ_next,
+      ingreso     = st$ingreso,
+      elegible    = st$elegible,
+      zona        = st$zona
+    ))
+  }
+  
+  # --- 10. Reagendar siguiente tick ---
+  if (time < Tmax) schedule(agent, newEvent(time + 1, tick_handler))
+}
+
+# =========================
+# 5) Ejecución del modelo
+# =========================
+
+sim$addLogger(newCounter("B","B"))
+sim$addLogger(newCounter("M","M"))
+sim$addLogger(newCounter("A","A"))
+
+schedule(sim$get, newEvent(0, tick_handler))
+res <- sim$run(0:Tmax)
+
+# proporción de inversión media o alta
+res$inversion_alta <- (res$M + res$A) / N
+res
+
+ggplot(res, aes(x = times, y = inversion_alta)) +
+  geom_line(size = 1.2, color = "purple") +
+  geom_area(alpha = 0.15, fill = "plum") +
+  labs(
+    title = "Evolución de la inversión educativa (ABM CCT)",
+    x = "Periodo / Generación",
+    y = "% hogares con inversión media o alta"
+  ) +
+  theme_minimal(base_size = 14)
+
+
+
+# =========================
+# 6) Experimentos completos
+# =========================
+
+# Grilla de parámetros a explorar
+escenarios <- expand.grid(
+  delay_prob_base = c(0.10, 0.40),   # puntualidad: alta / media / baja
+  subsidy_base     = c(300, 800),      # monto del subsidio
+  tau              = c(100, 400),      # temperatura de decisión
+  lambda_cred      = c(0.10, 0.30)    # velocidad de aprendizaje
+)
+
+resultados <- list()
+
+# Bucle principal
+for (e in 1:nrow(escenarios)) {
+  cat("Escenario", e, "de", nrow(escenarios), "\n")
+  
+  # Actualizar parámetros del escenario
+  params$delay_prob_base <- escenarios$delay_prob_base[e]
+  params$subsidy_base    <- escenarios$subsidy_base[e]
+  params$tau             <- escenarios$tau[e]
+  params$lambda_cred     <- escenarios$lambda_cred[e]
+  
+  # Crear nueva simulación
+  sim <- Simulation$new(N)
+  for (i in 1:N) {
+    sim$setState(
+      i,
+      list(
+        hogares$state0[i],
+        theta       = hogares$theta[i],
+        cred        = hogares$cred0[i],
+        educ_padres = hogares$educ_padres_madres[i],
+        educ_hijo   = hogares$escolaridad_hijxs[i],
+        ingreso     = hogares$ingreso_hogar[i],
+        elegible    = hogares$elegible_policy[i],
+        zona        = hogares$zona[i]
+      )
+    )
+  }
+  
+  # Loggers
+  sim$addLogger(newCounter("B","B"))
+  sim$addLogger(newCounter("M","M"))
+  sim$addLogger(newCounter("A","A"))
+  
+  # Ejecutar
+  schedule(sim$get, newEvent(0, tick_handler))
+  res_temp <- sim$run(0:Tmax)
+  
+  # Calcular inversión alta
+  res_temp$inversion_alta <- (res_temp$M + res_temp$A) / N
+  res_temp$escenario <- paste0(
+    "Delay=", escenarios$delay_prob_base[e],
+    ", Subsidio=", escenarios$subsidy_base[e],
+    ", Tau=", escenarios$tau[e],
+    ", Lambda=", escenarios$lambda_cred[e]
+  )
+  
+  resultados[[e]] <- res_temp
+}
+
+# Combinar resultados
+res_all <- bind_rows(resultados)
+
+
+ggplot(res_all, aes(x = times, y = inversion_alta, color = escenario)) +
+  geom_line(alpha = 0.7, size = 0.9) +
+  labs(
+    title = "Comparación de escenarios ABM (credibilidad, subsidio, tau, lambda)",
+    x = "Periodo / generación",
+    y = "% hogares con inversión media o alta",
+    color = "Escenario"
+  ) +
+  theme_minimal(base_size = 10) +
+  guides(color = guide_legend(ncol = 2))
+
+
+
+
+
+####
+library(viridis)
+
+ggplot(res_all, aes(x = times, y = inversion_alta, group = escenario, color = escenario)) +
+  geom_line(linewidth = 0.8, alpha = 0.8) +
+  # gradiente suave en viridis (accesible para color blindness)
+  scale_color_viridis_d(option = "plasma", end = 0.9) +
+  labs(
+    title = "Comparación de escenarios ABM",
+    subtitle = "Simulación multiescenario: credibilidad (λ), subsidio, puntualidad y temperatura de decisión (τ)",
+    x = "Periodo / generación",
+    y = "% hogares con inversión media o alta",
+    color = "Escenario"
+  ) +
+  theme_minimal(base_size = 10, base_family = "sans") +
+  theme(
+    plot.title = element_text(face = "bold", size = 15, color = "#3B0A45"),
+    plot.subtitle = element_text(size = 10, color = "#4B4B4B"),
+    axis.title.x = element_text(face = "bold", size = 11, margin = margin(t = 8)),
+    axis.title.y = element_text(face = "bold", size = 11, margin = margin(r = 8)),
+    axis.text = element_text(size = 8, color = "#3B3B3B"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "gray90"),
+    plot.background = element_rect(fill = "white", color = NA),
+    legend.position = "bottom",
+    legend.key.width = unit(1.5, "cm"),
+    legend.key.height = unit(0.4, "cm"),
+    legend.text = element_text(size = 8),
+    legend.title = element_text(face = "bold", size = 7),
+    plot.margin = margin(20, 20, 20, 20)
+  ) +
+  guides(color = guide_legend(ncol = 3, override.aes = list(linewidth = 2)))
