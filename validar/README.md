@@ -36,23 +36,19 @@ Se aplicó una validación tipo **hold-out (entrenamiento/prueba)** para medir l
 
 3. Para cada combinación se ejecutó una simulación completa de 30 periodos (`Tmax = 30`), y se calculó una **función de pérdida (L)**:
 
-```r
-L = 0.7 * (esc_sim - esc_obs)^2 + 0.3 * (mean(inversion_alta) - asis_obs)^2
-
-
-## 📐 Detalles de la función de pérdida
+`L = 0.7 * (esc_sim - esc_obs)^2 + 0.3 * (mean(inversion_alta) - asis_obs)^2`
 
 **Donde:**
 
-- `esc_sim` → nivel **simulado final de inversión educativa**.  
-- `esc_obs` → nivel **promedio de escolaridad observada** en los datos reales.  
-- `asis_obs` → **proporción observada de asistencia escolar**.
+- `esc_sim` nivel **simulado final de inversión educativa**.  
+- `esc_obs` nivel **promedio de escolaridad observada** en los datos reales.  
+- `asis_obs` **proporción observada de asistencia escolar**.
 
 > La pérdida pondera más la escolaridad final (70%) que la asistencia (30%), reflejando la prioridad del modelo en capturar la **movilidad educativa intergeneracional**.
 
 ---
 
-## 🧪 2. Resultados de calibración
+## 2. Resultados de calibración
 
 El proceso de calibración identificó el conjunto de parámetros con **menor pérdida (L)** durante la fase *train*:
 
@@ -64,39 +60,16 @@ El proceso de calibración identificó el conjunto de parámetros con **menor p�
 | `lambda_cred` | **0.10** |
 | **Pérdida Train (L)** | **0.0816** |
 
-📌 Este escenario indica que **niveles bajos de subsidio y alta incertidumbre en los pagos** reproducen mejor el patrón real de inversión educativa.  
+Este escenario indica que **niveles bajos de subsidio y alta incertidumbre en los pagos** reproducen mejor el patrón real de inversión educativa.  
 Esto sugiere que la **credibilidad institucional** (capacidad del programa para mantener confianza a largo plazo) juega un papel más relevante que el monto económico inmediato.
 
 ---
 
-## 🧾 3. Resultados de validación (TEST)
+## 3. Resultados de validación (TEST)
 
 Con los parámetros óptimos, se volvió a ejecutar la simulación sobre el **30% de los hogares no usados en la calibración**.
 
-> ✅ **Pérdida en TEST (L) = 0.0920**
+> **Pérdida en TEST (L) = 0.0920**
 
 El incremento marginal (de **0.0816 → 0.0920**) demuestra que el modelo **generaliza bien**, manteniendo un error bajo al enfrentarse a datos nuevos.  
 Esto confirma que el ABM **no está sobreajustado** y puede replicar con estabilidad los patrones empíricos observados.
-
----
-
-## 📈 4. Evaluación visual
-
-Se generó la siguiente gráfica para comparar el promedio observado de inversión educativa con la curva simulada en la base de *test*:
-
-```r
-obs_mean <- mean(hog_test$escolaridad_hijxs)
-
-ggplot(res_test, aes(x = times, y = inversion_alta)) +
-  geom_line(color = "#7B1FA2", size = 1.2) +
-  geom_hline(yintercept = obs_mean, linetype = "dashed", color = "gray40") +
-  annotate("text", x = Tmax * 0.7, y = obs_mean + 0.02,
-           label = paste0("Media observada: ", round(obs_mean, 2)),
-           color = "gray30", size = 3.5, hjust = 0) +
-  labs(
-    title = "Validación del modelo ABM (Base de Test)",
-    subtitle = "Curva simulada vs. promedio observado de inversión educativa",
-    x = "Periodo / generación",
-    y = "% hogares con inversión media o alta"
-  ) +
-  theme_minimal(base_size = 13)
