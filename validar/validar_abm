@@ -1,0 +1,121 @@
+# =========================
+# 1) Dividir base en train/test
+# =========================
+set.seed(123)
+id_train <- sample(hogares$id_hogar, size = round(0.7 * nrow(hogares)))
+hog_train <- hogares %>% filter(id_hogar %in% id_train)
+hog_test  <- hogares %>% filter(!id_hogar %in% id_train)
+
+# =========================
+# 2) Definir función de pérdida simple
+# =========================
+loss_vs_targets <- function(res, hog_data) {
+  esc_obs <- mean(hog_data$escolaridad_hijxs)
+  asis_obs <- mean(hog_data$asistencia_escolar)
+  esc_sim <- res$inversion_alta[nrow(res)]  # valor final simulado
+  L <- (0.7 * (esc_sim - esc_obs)^2) + (0.3 * (mean(res$inversion_alta) - asis_obs)^2)
+  return(L)
+}
+
+# =========================
+# 3) Grid de calibración sobre TRAIN
+# =========================
+escenarios <- expand.grid(
+  delay_prob_base = c(0.10, 0.40),
+  subsidy_base    = c(300, 800),
+  tau             = c(100, 400),
+  lambda_cred     = c(0.10, 0.30)
+)
+
+resultados_train <- data.frame()
+
+# ⚠️ Antes de iniciar, asegúrate de tener tick_handler y params definidos igual que en tu modelo base.
+#     (no los metas dentro de funciones: deben existir en el entorno global)
+#     params debe actualizarse dentro del bucle.
+
+# =========================
+# 4) Bucle de calibración (train)
+# =========================
+for (e in 1:nrow(escenarios)) {
+  cat("Escenario", e, "de", nrow(escenarios), "\n")
+  
+  params$delay_prob_base <- escenarios$delay_prob_base[e]
+  params$subsidy_base    <- escenarios$subsidy_base[e]
+  params$tau             <- escenarios$tau[e]
+  params$lambda_cred     <- escenarios$lambda_cred[e]
+  
+  N <- nrow(hog_train)
+  sim <- Simulation$new(N)
+  for (i in 1:N) {
+    sim$setState(
+      i,
+      list(
+        hog_train$state0[i],
+        theta       = hog_train$theta[i],
+        cred        = hog_train$cred0[i],
+        educ_padres = hog_train$educ_padres_madres[i],
+        educ_hijo   = hog_train$escolaridad_hijxs[i],
+        ingreso     = hog_train$ingreso_hogar[i],
+        elegible    = hog_train$elegible_policy[i],
+        zona        = hog_train$zona[i]
+      )
+    )
+  }
+  
+  sim$addLogger(newCounter("B", "B"))
+  sim$addLogger(newCounter("M", "M"))
+  sim$addLogger(newCounter("A", "A"))
+  schedule(sim$get, newEvent(0, tick_handler))
+  
+  res_temp <- sim$run(0:Tmax)
+  res_temp$inversion_alta <- (res_temp$M + res_temp$A) / N
+  loss_val <- loss_vs_targets(res_temp, hog_train)
+  
+  resultados_train <- rbind(resultados_train,
+                            cbind(escenarios[e, ], loss = loss_val))
+}
+
+# =========================
+# 5) Elegir el mejor escenario
+# =========================
+best_params <- resultados_train %>%
+  slice_min(loss, n = 1)
+
+print(best_params)
+
+# =========================
+# 6) Validar en TEST con los mejores parámetros
+# =========================
+params$delay_prob_base <- best_params$delay_prob_base
+params$subsidy_base    <- best_params$subsidy_base
+params$tau             <- best_params$tau
+params$lambda_cred     <- best_params$lambda_cred
+
+N <- nrow(hog_test)
+sim <- Simulation$new(N)
+for (i in 1:N) {
+  sim$setState(
+    i,
+    list(
+      hog_test$state0[i],
+      theta       = hog_test$theta[i],
+      cred        = hog_test$cred0[i],
+      educ_padres = hog_test$educ_padres_madres[i],
+      educ_hijo   = hog_test$escolaridad_hijxs[i],
+      ingreso     = hog_test$ingreso_hogar[i],
+      elegible    = hog_test$elegible_policy[i],
+      zona        = hog_test$zona[i]
+    )
+  )
+}
+
+sim$addLogger(newCounter("B", "B"))
+sim$addLogger(newCounter("M", "M"))
+sim$addLogger(newCounter("A", "A"))
+schedule(sim$get, newEvent(0, tick_handler))
+res_test <- sim$run(0:Tmax)
+res_test$inversion_alta <- (res_test$M + res_test$A) / N
+
+# Calcular pérdida en test
+L_test <- loss_vs_targets(res_test, hog_test)
+cat("\n✅ Pérdida en TEST:", round(L_test, 6), "\n")
