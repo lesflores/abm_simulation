@@ -14,7 +14,7 @@ Evaluar cómo los **parámetros de política pública** (subsidio, puntualidad, 
 
 ---
 
-## ⚙️ Objetivos específicos
+## Objetivos específicos
 
 1. **Representar la toma de decisiones de los hogares**, considerando:
    - Retornos educativos esperados.
@@ -35,7 +35,7 @@ Evaluar cómo los **parámetros de política pública** (subsidio, puntualidad, 
 
 ---
 
-## 📈 Resultados esperados
+## Resultados esperados
 
 - Trayectorias temporales de la proporción de hogares con **inversión media o alta** (`inversion_alta`).
 - Evolución de la **credibilidad promedio** del programa.
@@ -44,7 +44,7 @@ Evaluar cómo los **parámetros de política pública** (subsidio, puntualidad, 
 
 ---
 
-## ❓Preguntas que responde el modelo
+## Preguntas que responde el modelo
 
 - ¿Qué pesa más para mejorar la inversión educativa: el monto del subsidio o la puntualidad del programa?
 - ¿Cuánta puntualidad mínima se requiere para que la política sea efectiva?
@@ -53,7 +53,7 @@ Evaluar cómo los **parámetros de política pública** (subsidio, puntualidad, 
 
 ---
 
-## 🧪 Indicadores de calibración
+## Indicadores de calibración
 
 Para validar el modelo, se propone minimizar una función de pérdida ponderada entre datos simulados y observados:
 
@@ -68,7 +68,7 @@ donde:
 
 ---
 
-## 🗂️ Estructura del código
+## Estructura del código
 
 1. **Paquetes y datos:** carga de librerías y base real (`hogares_base.xlsx`).
 2. **Parámetros del programa:** define elegibilidad, subsidio, credibilidad y temperatura de decisión.
@@ -79,9 +79,8 @@ donde:
 
 ---
 
-## 🧭 Referencia conceptual
+## Conceptos
 
-El modelo combina:
 - **Dimensión económica:** incentivos y retornos tipo Mincer.
 - **Dimensión cognitiva:** aprendizaje de credibilidad mediante `λ`.
 - **Dimensión contextual:** estacionalidad y brechas rural/urbano.
