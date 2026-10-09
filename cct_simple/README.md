@@ -1,143 +1,121 @@
-# 1) Preparación
-   
-**Paquete y semilla.**
-`library(ABM)` carga la mini-infraestructura de simulación (agentes, eventos, contadores).
+# cct_simple · Umbral + credibilidad
 
-`set.seed(1)` fija aleatoriedad reproducible (para que tu experimento sea replicable).
+Modelo mínimo de un programa de transferencias condicionadas (CCT) a la asistencia escolar. Cada hogar decide cada mes si manda a sus hijxs a la escuela comparando cuánto espera recibir del programa con su umbral personal. Lo que espera recibir depende de su credibilidad, es decir, de cuánto confía en que el pago llegará a tiempo, y esa credibilidad se aprende con la experiencia.
+
+Es el modelo de la sesión 1. Sirve para aprender la estructura del paquete `ABM` y para una lección central del curso: **antes de interpretar una gráfica, hay que verificar si el patrón viene del mundo o de un supuesto del código.**
+
+# 1) Preparación
+
+**Paquetes y semilla.**
+`library(ABM)` carga la infraestructura de simulación (agentes, eventos, contadores) y `library(ggplot2)` el gráfico.
+
+`set.seed(1)` fija la aleatoriedad para que el experimento sea reproducible: todos obtienen la misma curva.
 
 # 2) Parámetros del modelo
 
-`N = 5000:` número de hogares (1 agente = 1 hogar).
+`N = 5000`: número de hogares (1 agente = 1 hogar).
 
-`Tmax = 36:` meses a simular.
+`Tmax = 36`: meses a simular.
 
-`transfer_amount = 600:` monto nominal esperado.
+`transfer_amount = 600`: monto nominal mensual.
 
-`delay_prob_base = 0.30:` probabilidad de retraso (o sea, de no pago a tiempo).
+`delay_prob_base = 0.30`: probabilidad de que el pago llegue tarde.
 
-`lambda_cred = 0.30:` qué tan rápido se ajusta la credibilidad con un promedio móvil (0=lento, 1=rapidísimo).
+`lambda_cred = 0.30`: qué tan rápido se ajusta la credibilidad (0 = lento, 1 = muy rápido).
+
+**Interruptores:**
+
+`senal_publica = FALSE`: qué señal recibe un hogar que **no** asiste.
+- `FALSE` (regla original): su señal es 0, como si el pago hubiera llegado tarde.
+- `TRUE` (corrección): recibe la señal pública `1 - delay_prob_base`, es decir, lo que se sabe en su comunidad sobre la puntualidad del programa.
+
+`con_trabajo = FALSE`: si es `TRUE`, una proporción `prop_trabajo = 0.40` de los hogares tiene un hijo que trabaja y nunca asiste. Es el ejercicio de tarea.
 
 # 3) Construir el "mundo" y el estado inicial
 
 `sim <- Simulation$new(N)` crea la simulación con IDs 1..N.
 
-Estado principal del agente: "A" o "N".
+Estado principal del agente: "A" (asiste) o "N" (no asiste).
 
 Atributos por agente:
 
-`theta:` umbral individual de decisión (heterogéneo, ~ Normal(300, 80)).
+`theta`: umbral individual de decisión (heterogéneo, ~ Normal(300, 80)). Representa todo lo que le cuesta al hogar cumplir con la escuela, expresado en pesos.
 
-`cred:` credibilidad inicial = 1 − delay_prob_base (= 0.70).
+`cred`: credibilidad inicial = 1 − `delay_prob_base` (= 0.70).
 
-**Seeding:** `seedA <- 10.` Los primeros 10 agentes arrancan asistiendo ("A") para no empezar con cero asistencia.
+`trabaja`: `TRUE` si el hogar tiene un hijo que trabaja (solo si `con_trabajo = TRUE`).
 
-Bucle `for (i in 1:N):` para cada agente, se define theta, cred0 y el estado inicial; luego sim$setState(i, list(state0, theta=..., cred=...)).
-Nota: en setState(...) el primer elemento de la lista siempre es el **estado**; lo demás son atributos.
+**Seeding:** `seedA <- 10`. Los primeros 10 agentes arrancan en "A". Esto **no cambia el resultado**: la regla de decisión no mira el estado anterior del hogar, solo su credibilidad y su umbral. Únicamente mueve el primer punto de la gráfica.
+
+Nota: en `setState(...)` el primer elemento de la lista siempre es el **estado**; lo demás son atributos con nombre.
 
 # 4) Loggers (contadores automáticos)
 
-`sim$addLogger(newCounter("A", "A")) y ("N","N")` crean dos columnas de salida que, en cada tick, cuentan cuántos están en A y cuántos en N.
-Esto facilita luego calcular la proporción que asiste.
+`sim$addLogger(newCounter("A", "A"))` y `("N", "N")` crean dos columnas de salida que, en cada tick, cuentan cuántos hogares están en A y cuántos en N.
+
+En versiones recientes del paquete puede aparecer un aviso de que `newCounter()` está obsoleto. Es solo una advertencia: el modelo corre bien.
 
 # 5) Dinámica mensual (el "handler" del tick)
 
-- Qué es el handle que regresa `getAgent(sim, i):` Es una referencia al agente `i` que está dentro de `sim.` Con esa referencia puedes leer su estado `(getState(...))` y escribir cambios `(setState(...)).`
+La función `tick_handler(time, sim, agent)` define qué pasa cada mes. Para cada hogar sigue el patrón **leer → decidir → escribir**.
 
-La función `tick_handler(time, sim, agent)` define qué pasa cada mes. Dentro:
+**Leer.** `ai <- getAgent(sim, i)` da una referencia al agente i; `st <- getState(ai)` trae su ficha:
 
-**1. Recorres los N agentes** `(bucle for (i in 1:N)):`
+1. `st[[1]]`: su estado, "A" o "N"
+2. `st$theta`: su umbral
+3. `st$cred`: su credibilidad (0 a 1)
+4. `st$trabaja`: si tiene un hijx que trabaja
 
-- `ai <- getAgent(sim, i)` y `st <- getState(ai)` para leer estado y atributos actuales.
+**Decidir.**
 
-`st` la info actual del agente (estado, umbral, credibilidad) y trae tres cosas:
+- **Beneficio esperado:** `benefit = transfer_amount * st$cred`. Es el monto nominal multiplicado por la probabilidad percibida de que el pago llegue a tiempo. Si la credibilidad es alta, el hogar espera más; si es baja, espera menos aunque el monto sea el mismo.
+- **Regla de decisión:** asiste si `benefit >= st$theta`. Si `trabaja` es `TRUE`, no asiste.
 
-1. `st[[1]]` su estado: "A" (asiste) o "N" (no asiste)
+**Señal del mes.** Es lo que el hogar observa sobre la puntualidad del programa:
 
-2. `st$theta` su umbral para decidir (qué tanto beneficio necesita)
+- Si asistió, observa su propio pago: `runif(1) > delay_prob_base` es 1 (puntual, con probabilidad 0.70) o 0 (tarde, con probabilidad 0.30).
+- Si no asistió y `senal_publica = FALSE`, su señal es **0**. Ojo: esto significa que no asistir cuenta como un retraso. La credibilidad de quien sale cae cada mes, su beneficio esperado nunca vuelve a superar su umbral y ya no regresa. En términos técnicos, no asistir es un **estado absorbente**.
+- Si no asistió y `senal_publica = TRUE`, su señal es `1 - delay_prob_base`. No ve su propio pago, pero sabe cómo funciona el programa en su comunidad, y puede volver a asistir cuando su credibilidad se recupera.
 
-3. `st$cred` su credibilidad (0 a 1) sobre que el pago llegue a tiempo
+**Actualización de credibilidad** (promedio móvil exponencial):
 
-- **Beneficio esperado** este mes: `benefit = transfer_amount * st$cred.`
-Esto representa el valor esperado del pago: el monto nominal ($600) multiplicado por la probabilidad percibida de que el pago llegue a tiempo.
-Así, si la credibilidad (cred) es alta, el hogar espera obtener más beneficio (porque confía en que sí cobrará); si es baja, el beneficio esperado disminuye, aunque el monto nominal sea el mismo.
+`cred_new <- (1 - lambda_cred) * st$cred + lambda_cred * senal`
 
-- **Regla de decisión** mínima:
-`new_state <- if (benefit >= st$theta) "A" else "N".`
-El hogar asiste si el beneficio esperado supera su umbral.
+Da más peso a lo reciente y menos a lo pasado; el peso de los meses anteriores decae exponencialmente. Con `lambda_cred = 0.1` la credibilidad cambia poco cada mes; con `0.8` cambia mucho. Si la señal es 1, la credibilidad sube hacia 1; si es 0, baja hacia 0.
 
-- **Realización del pago a tiempo** (solo si decidió asistir):
-`paid_on_time <- (new_state == "A") && (runif(1) > delay_prob_base).`
+`theta` no cambia: es un rasgo fijo del hogar en este modelo.
 
-Es decir, tiras una moneda: con prob. 0.70 llega a tiempo; con 0.30 se retrasa.
+**Escribir.** `setState(ai, list(new_state, theta = st$theta, cred = cred_new, trabaja = st$trabaja))`. `setState` reemplaza la ficha completa: si se omite un atributo, desaparece. Por eso se vuelven a escribir `theta` y `trabaja` aunque no cambien.
 
-Solo si el hogar asistió `(new_state == "A")` sorteas si el pago fue puntual.
-
-`runif(1)` genera un número entre 0 y 1. Con `delay_prob_base = 0.30,` hay 70% de que sea puntual (número > 0.30).
-
-Resultado: `paid_on_time` es TRUE (puntual) o FALSE (tardío).
-(Si no asistió, la expresión completa da FALSE por el &&.)
-
-- **Actualización de credibilidad** (EMA/promedio móvil exponencial): es una forma de actualizar un valor con el tiempo dando más peso a lo reciente y menos a lo pasado. Se llama "exponencial" porque el peso de lo ocurrido en meses anteriores se va haciendo cada vez más pequeño (decae exponencialmente) conforme pasa el tiempo. Lo controla un número entre 0 y 1 llamado lambda: p. ej., 0.1 cambias poco cada mes (recuerdas más el pasado); p. ej., 0.8 cambias mucho cada mes (te influye más lo reciente).
-  
-`cred_new <- (1 - lambda_cred) * st$cred + lambda_cred*as.numeric(paid_on_time)`
-
-`st$cred` = credibilidad anterior (del mes pasado).
-
-`as.numeric(paid_on_time)` convierte:
-
-`TRUE` = 1 (pago puntual)
-
-`FALSE` = 0 (pago tardío / no asistió
-
-**Orden de operación:** 
-
-1. Calcula el peso de ayer: `1 - lambda_cred.`
-
-2. Multiplica ese peso por la credibilidad anterior: `(1 - lambda_cred) * st$cred.`
-
-3. Convierte paid_on_time a número (1 o 0) y multiplícalo por el peso de hoy:
-`lambda_cred * as.numeric(paid_on_time).`
-
-4. Suma las dos partes. Eso es `cred_new.`
-
-Si pagaron a tiempo (1), cred sube hacia 1.
-
-Si se retrasó (0), cred baja hacia 0.
-
-Importante: theta no cambia; es un rasgo fijo del hogar en este modelo.
-
-- **Guardar nuevo estado y atributos:**
-`setState(ai, list(new_state, theta = st$theta, cred = cred_new)).`
-
-**2. Re-agendar el evento** para el próximo mes (si time < Tmax):
-`schedule(agent, newEvent(time + 1, tick_handler)).`
-Así, el mismo handler se ejecuta en t=1,2,…,Tmax.
+**Re-agendar** para el próximo mes: `if (time < Tmax) schedule(agent, newEvent(time + 1, tick_handler))`. Esta línea es la que hace avanzar el reloj; sin ella, la simulación corre un solo mes.
 
 # 6) Ejecutar la simulación
 
-`schedule(sim$get, newEvent(0, tick_handler))` agenda el primer tick en t=0.
+`schedule(sim$get, newEvent(0, tick_handler))` agenda el primer tick en t = 0.
 
-`res <- sim$run(0:Tmax)` corre todo y regresa un data.frame con: times (el mes); A y N (los contadores de asistencia/no asistencia).
+`res <- sim$run(0:Tmax)` corre todo y regresa un data.frame con `times` (el mes), `A` y `N` (los contadores).
 
-Luego calculas la proporción que asiste:
-`res$attend <- res$A / N.`
+`res$attend <- res$A / N` calcula la proporción que asiste.
+
+El punto de `times = 0` es el **estado inicial**, antes de la primera decisión. Por eso la gráfica arranca casi en cero y salta en el mes 1.
 
 # Qué está modelando
 
-- **Micro‐regla:** cada hogar decide A/N comparando su beneficio esperado `(monto * cred)` con su umbral `(theta).`
-
-- **Aprendizaje:** la credibilidad se mueve según la experiencia reciente con el programa (pagos puntuales vs retrasos).
-
-- **Efecto esperado:**
-
-1. Si los pagos suelen llegar a tiempo (prob. alta de éxito), `cred` tenderá a subir y más hogares asistirán.
-
-2. Si hay muchos retrasos, `cred` cae y la asistencia se erosiona.
-
-3. `lambda_cred` controla cuán sensible es la credibilidad a experiencias recientes.
+- **Micro-regla:** cada hogar decide A/N comparando su beneficio esperado (`monto * cred`) con su umbral (`theta`).
+- **Aprendizaje:** la credibilidad se mueve según la experiencia reciente con el programa.
+- **Supuestos que conviene tener presentes:** el hogar es miope (solo mira la transferencia de este mes, no los beneficios futuros de estudiar); un pago tarde se trata como si no hubiera llegado; y el umbral reúne en un solo número, en pesos, costos que no son dinero (tiempo, transporte, trabajo infantil).
 
 # Lectura de resultados
 
-- Curva de `attend`: debería estabilizarse en algún nivel, subir o bajar según el balance entre el umbral promedio `(theta)` y la credibilidad endógena que se va formando por la puntualidad de pagos.
+Resultados con `set.seed(1)` y los parámetros base (proporción que asiste):
 
-- `Con delay_prob_base = 0.30` (70% de puntualidad) y umbrales ~N(300,80) con `transfer_amount=600`, es razonable ver asistencia media-alta que quizá suba al inicio (la credibilidad parte en 0.70 y puede reforzarse si la suerte acompaña).
+| Configuración | Mes 1 | Mes 12 | Mes 36 |
+| --- | --- | --- | --- |
+| Regla original (`senal_publica = FALSE`) | 0.93 | 0.38 | 0.14 |
+| Con señal pública (`senal_publica = TRUE`) | 0.93 | 0.77 | 0.76 |
+| Regla original + `con_trabajo = TRUE` | 0.56 | 0.23 | 0.09 |
+| Señal pública + `con_trabajo = TRUE` | 0.56 | 0.46 | 0.46 |
+
+- **Con la regla original**, la asistencia cae sin estabilizarse, sin importar qué tan puntual sea el programa: los parámetros solo cambian la velocidad de la caída. No es un hallazgo sobre los hogares, sino una consecuencia de tratar la no asistencia como un retraso.
+- **Con señal pública**, la asistencia se estabiliza desde el mes 3, y la puntualidad sí cambia el nivel: con `delay_prob_base = 0.10` se queda cerca de 97%, y con `0.50` cerca de 30%.
+- `lambda_cred` sí cambia el nivel en la versión corregida (más alto, menos asistencia), porque la regla de umbral es abrupta: con λ alto, un solo retraso basta para que un hogar cercano a su umbral deje de asistir ese mes.
