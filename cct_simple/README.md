@@ -29,7 +29,7 @@ Es el modelo de la sesión 1. Sirve para aprender la estructura del paquete `ABM
 - `FALSE` (regla original): su señal es 0, como si el pago hubiera llegado tarde.
 - `TRUE` (corrección): recibe la señal pública `1 - delay_prob_base`, es decir, lo que se sabe en su comunidad sobre la puntualidad del programa.
 
-`con_trabajo = FALSE`: si es `TRUE`, una proporción `prop_trabajo = 0.40` de los hogares tiene un hijo que trabaja y nunca asiste. Es el ejercicio de tarea.
+`con_trabajo = FALSE`: si es `TRUE`, una proporción `prop_trabajo = 0.40` de los hogares tiene un hijx que trabaja y nunca asiste. Es el ejercicio.
 
 # 3) Construir el "mundo" y el estado inicial
 
@@ -43,7 +43,7 @@ Atributos por agente:
 
 `cred`: credibilidad inicial = 1 − `delay_prob_base` (= 0.70).
 
-`trabaja`: `TRUE` si el hogar tiene un hijo que trabaja (solo si `con_trabajo = TRUE`).
+`trabaja`: `TRUE` si el hogar tiene un hijx que trabaja (solo si `con_trabajo = TRUE`).
 
 **Seeding:** `seedA <- 10`. Los primeros 10 agentes arrancan en "A". Esto **no cambia el resultado**: la regla de decisión no mira el estado anterior del hogar, solo su credibilidad y su umbral. Únicamente mueve el primer punto de la gráfica.
 
