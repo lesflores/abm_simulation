@@ -1,151 +1,58 @@
-# Simulación ABM con elegibilidad por pobreza y transferencias por hijo
-# 1) Preparación
+# cct_per_child · Elegibilidad por pobreza + transferencia por hijx
 
-**Paquete y semilla**
+Modelo per child. Parte del modelo simple ya corregido (con señal pública) y le agrega **heterogeneidad** y **reglas de política**: cada hogar tiene un número de hijxs y un ingreso, y el programa solo paga a los hogares bajo la línea de pobreza, por hijx y con un tope.
 
-- `library(ABM)` carga la mini-infraestructura de simulación: define agentes, eventos y contadores.
+# 1) Parámetros
 
-- `set.seed(1)` asegura que la aleatoriedad sea reproducible, es decir, obtendrás los mismos resultados cada vez que corras la simulación.
+**Del modelo (igual que en el modelo simple):** `N = 5000`, `Tmax = 36`, `delay_prob_base = 0.30`, `lambda_cred = 0.30`.
 
-# 2) Parámetros del modelo
+**Reglas del programa** (decisiones de diseño de la política):
 
-- `N = 5000:` número de hogares simulados (cada agente representa un hogar).
+- `base_transfer_per_child = 300`: monto mensual por hijx cubierto.
+- `max_children_paid = 2`: tope de hijxs cubiertos por hogar.
+- `poverty_line = 4500`: el hogar es elegible si su ingreso es menor.
 
-- `Tmax = 36:` duración de la simulación en meses (3 años).
+**Población** (cómo son los hogares):
 
-- `delay_prob_base = 0.30:` probabilidad de retraso en el pago (30% de los meses no llega a tiempo).
+- `ingreso_mediano = 4000` e `ingreso_desigual = 0.5`: el ingreso sigue una distribución lognormal.
+- `prob_hijos = c(0.25, 0.40, 0.25, 0.10)`: probabilidad de tener 0, 1, 2 o 3 hijxs en edad escolar.
 
-- `lambda_cred = 0.30:` ritmo de aprendizaje de la credibilidad (0 = olvida lento, 1 = muy reactivo).
+**Interruptor:** `senal_publica = TRUE` mantiene la corrección del modelo simple. Con `FALSE` vuelve la regla original, en la que no asistir cuenta como retraso.
 
-- `base_transfer_per_child = 300:` monto base mensual por hijx elegible.
+# 2) Atributos nuevos de cada hogar
 
-- `max_children_paid = 2:` máximo de hijxs cubiertos por hogar.
+- `n_hijos`: número de hijxs en edad escolar (0 a 3).
+- `Y_hogar`: ingreso mensual del hogar sin la transferencia.
+- `elegible`: `TRUE` si `Y_hogar < poverty_line`.
 
-- `poverty_line = 4500:` umbral de ingreso (en pesos) para determinar elegibilidad al programa.
+Como en el modelo simple, `setState` reemplaza la ficha completa y los tres atributos se vuelven a escribir cada mes aunque no cambien.
 
-# 3) Crear la simulación y el estado inicial
+# 3) La nueva regla del beneficio
 
-- `Simulation$new(N)` crea el "mundo" con N agentes numerados del 1 al N.
-
-- `seedA <- 10:` número de hogares que comienzan asistiendo (A) para evitar que todos empiecen en N.
-
-**Bucle de inicialización**
-
-- `theta:` umbral individual de decisión (cuánto beneficio necesita un hogar para asistir); distribuido ~ Normal(300, 80).
-
-- `cred0:` credibilidad inicial (0.70 si probabilidad de pago puntual = 70%).
-
-- `state0:` estado inicial (A = asiste, N = no asiste).
-
-- `n_hijos:` número de hijxs beneficiarios potenciales (0–3, con probabilidades dadas).
-
-- `Y_hogar:` ingreso del hogar sin transferencias; modelado lognormal para simular desigualdad.
-
-- `elegible:` TRUE si el ingreso está por debajo de la línea de pobreza; FALSE si no.
-
-- `sim$setState(...):` guarda todos los atributos dentro del agente.
-
-Nota: el primer elemento de la lista (state0) siempre es el estado del agente; los demás son atributos.
-
-# 4) Loggers (contadores automáticos)
-
-`sim$addLogger(newCounter("A", "A"))`
-`sim$addLogger(newCounter("N", "N"))`
-
-- Crea dos columnas `(A y N)` que cuentan, en cada mes `(tick),` cuántos hogares están asistiendo o no.
-
-- Luego, se usa para calcular proporciones `(res$attend = res$A / N).`
-
-# 5) Dinámica mensual (el "handler" del tick)
-
-La función `tick_handler(time, sim, agent)` describe **qué ocurre cada mes.**
-
-- `getAgent(sim, i)` devuelve el handle (referencia) del agente i.
-
-- `getState(ai)` devuelve su estado actual `(st[[1]])` y atributos `(st$theta, st$cred, st$n_hijos,` etc.).
-
-**a. Cálculo del beneficio esperado**
-
-`hijos_cubiertos <- min(st$n_hijos, max_children_paid)
+```r
+hijos_cubiertos <- min(st$n_hijos, max_children_paid)
 transfer_eff    <- if (st$elegible) base_transfer_per_child * hijos_cubiertos else 0
-benefit         <- transfer_eff * st$cred`
+benefit         <- transfer_eff * st$cred
+new_state       <- if (benefit >= st$theta) "A" else "N"
+```
 
-- Si el hogar es elegible, recibe la transferencia base × número de hijos cubiertos (hasta el límite).
+Lo demás (señal, credibilidad, re-agendar) es igual que en el modelo simple.
 
-- Si no es elegible, `transfer_eff = 0.`
+# 4) Resultados
 
-- El beneficio esperado es esa cantidad multiplicada por la credibilidad (probabilidad percibida de que el pago llegue). Si el hogar desconfía (cred baja), su beneficio esperado es menor, aunque el monto sea alto.
+Cada corrida muestra y guarda (el nombre del archivo incluye monto, tope y línea):
 
-**b. Decisión de asistencia**
+- `resumen_*.csv`: asistencia en los meses 1, 12 y 36, para **todos los hogares** y solo para **hogares con hijxs**.
+- `por_grupo_*.csv`: asistencia en el mes 36 por elegibilidad y número de hijxs.
+- `asistencia_*.png` y `por_grupo_*.png`: las gráficas.
 
-`new_state <- if (benefit >= st$theta) "A" else "N"`
+Resultados con los valores base (`set.seed(1)`), mes 36:
 
-- Si el beneficio esperado supera el umbral `(theta),` el hogar decide asistir (A).
-
-- Si no, se queda en N.
-
-**c. Pago puntual o retrasado**
-
-`paid_on_time <- (new_state == "A") && (runif(1) > delay_prob_base)`
-
-- Si asiste, se lanza una moneda (runif(1) genera un número 0–1):
-    - Mayor a 0.30: pago puntual (TRUE)
-    - Menor a 0.30: pago retrasado (FALSE)
-    Nota: la probabilidad de pago puntual es 70%, 
-- Si no asiste, no se evalúa el pago (queda FALSE).
-
-**d. Actualización de credibilidad**
-
-`cred_new <- (1 - lambda_cred) * st$cred + lambda_cred * as.numeric(paid_on_time)`
-
-- EMA (promedio móvil exponencial): actualiza la credibilidad dando más peso a lo reciente.
-
-- `lambda_cred = 0.3` la experiencia del mes afecta un 30% del valor nuevo.
-
-- Si el pago fue puntual `(paid_on_time = TRUE → 1), cred_new` sube hacia 1;
-si fue tardío `(FALSE - > 0),` baja hacia 0.
-
-- Ejemplo:
-   - cred pasada = 0.70; pago puntual - > cred_new = 0.7×0.7 + 0.3×1 = 0.79
-   - cred pasada = 0.79; pago tardío - > cred_new = 0.7×0.79 + 0.3×0 = 0.55
- 
-**e. Guardar estado actualizado**
-
-- `new_state:` A/N del mes actual
-
-- `theta:` no cambia
-
-- `cred_new:` credibilidad actualizada
-
-- `n_hijos, Y_hogar, elegible:` atributos fijos por ahora
-
-**f. Re-agendar evento**
-
-`if (time < Tmax) schedule(agent, newEvent(time + 1, tick_handler))`
-
-- Agenda el mismo proceso para el siguiente mes `(t+1).`
-
-- Así, la simulación se repite hasta `Tmax.`
-
-# 6) Ejecutar la simulación
-
-- `schedule(sim$get, ...)` lanza la primera ejecución en t=0.
-
-- `sim$run(0:Tmax)` ejecuta toda la simulación y devuelve un data.frame con:
-   - `time:` el mes
-   - `A y N:` los contadores de asistencia/no asistencia
-- `res$attend:` proporción de hogares que asistieron en cada mes.
-
-# Qué modela esta versión
-
-- **Heterogeneidad:** cada hogar tiene diferente umbral `(theta),` ingreso `(Y_hogar),` y número de hijxs `(n_hijos).`
-- **Elegibilidad:** solo los hogares bajo la línea de pobreza reciben transferencias.
-- **Condicionalidad:** la asistencia depende del beneficio esperado y de la credibilidad en los pagos.
-- **Aprendizaje:** la credibilidad se ajusta mes a mes según experiencias previas (puntualidad de pagos).
-
-# Interpretación esperada
-
-- Los hogares no elegibles (con ingresos > pobreza_line) nunca recibirán transferencias, por lo que tenderán a no asistir.
-- Los hogares más pobres y con más hijxs tendrán un beneficio esperado mayor - > mayor probabilidad de asistir.
-- Si los pagos suelen llegar puntuales, la credibilidad crece y la asistencia se mantiene o sube.
-- Si hay muchos retrasos, la credibilidad cae y la asistencia disminuye.
+| | Asistencia |
+| --- | --- |
+| Todos los hogares | 18.1% |
+| Hogares con hijxs | 24.2% |
+| Elegibles con 1 hijx | 11% |
+| Elegibles con 2 hijxs | 75% |
+| Elegibles con 3 hijxs | 75% |
+| No elegibles | 0% |
