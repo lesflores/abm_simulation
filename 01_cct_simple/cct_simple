@@ -1,7 +1,7 @@
 # =====================================================================
-# cct_simple · Modelo mínimo de transferencias condicionadas (CCT)
+# cct_simple. Modelo mínimo de transferencias condicionadas (CCT)
 # Umbral de decisión + credibilidad aprendida
-# Sesión 1 del curso de simulación basada en agentes
+# Modelo simple del curso de simulación basada en agentes
 # =====================================================================
 
 # =========================
