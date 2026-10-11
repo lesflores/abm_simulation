@@ -1,0 +1,50 @@
+# =====================================================================
+# simular(). El modelo cct_vecinxs en versión rápida
+# Mismas reglas que cct_vecinxs, pero calcula a todos los hogares
+# a la vez, en lugar de uno por uno. Tarda menos de un segundo por corrida.
+# =====================================================================
+
+# Valor de estudiar calibrado para cada fuerza de vecinxs (el presente da ~13%)
+VALOR_CALIBRADO <- c(`0` = 1040, `150` = 920, `300` = 790, `450` = 660, `600` = 540)
+
+simular <- function(fuerza_vecinos = 300,
+                    valor_estudiar = VALOR_CALIBRADO[[as.character(fuerza_vecinos)]],
+                    con_programa = TRUE,      # TRUE, FALSE, o un vector con TRUE/FALSE por comunidad
+                    monto = 300, meses = 48, desde = 24, semilla = 1) {
+  set.seed(semilla)
+  nc <- 60; per <- 50; N <- nc * per
+  comunidad <- rep(1:nc, each = per)
+  rural_c   <- seq_len(nc) <= 24
+  rural     <- rural_c[comunidad]
+  prog_c    <- if (length(con_programa) == 1) rep(con_programa, nc) else con_programa
+
+  hijos    <- sample(1:3, N, replace = TRUE, prob = c(0.40, 0.25, 0.10))
+  ingreso  <- rlnorm(N, log(4000) - 0.3 * rural, 0.5)
+  pobre    <- ingreso < 4500                      # sería elegible
+  elegible <- pobre & prog_c[comunidad]           # recibe beca
+  theta    <- rnorm(N, 300, 80) + 100 * rural
+  edad     <- sample(12:17, N, replace = TRUE)
+  salario0 <- 300 * exp(0.12 * (edad - 12))
+
+  cred <- rep(0.7, N); vecinos <- rep(0.87, nc)
+  trabajo <- numeric(N); n_meses <- 0
+  for (t in 0:(meses - 1)) {
+    temporada <- ((t %% 12) + 1) %in% 6:9
+    salario <- salario0 * ifelse(rural & temporada, 1.4, 1)
+    beca    <- ifelse(elegible, monto * pmin(hijos, 2), 0) * cred
+    norma   <- fuerza_vecinos * vecinos[comunidad]
+    U_E  <- beca + valor_estudiar     + norma     - theta
+    U_ET <- beca + valor_estudiar / 2 + norma / 2 + salario / 2 - theta
+    U_T  <- salario
+    m <- pmax(U_E, U_ET, U_T)
+    p_E <- exp((U_E - m) / 120); p_ET <- exp((U_ET - m) / 120); p_T <- exp((U_T - m) / 120)
+    u <- runif(N) * (p_E + p_ET + p_T)
+    estado <- ifelse(u < p_E, "E", ifelse(u < p_E + p_ET, "ET", "T"))
+    cobra <- elegible & estado != "T"
+    cred  <- 0.7 * cred + 0.3 * ifelse(cobra, as.numeric(runif(N) > 0.3), 0.7)
+    vecinos <- tapply(estado == "E", comunidad, mean)
+    if (t >= desde) { trabajo <- trabajo + (estado != "E"); n_meses <- n_meses + 1 }
+  }
+  data.frame(id = 1:N, comunidad = comunidad, rural = rural, tratada = prog_c[comunidad],
+             elegible = pobre, trabajo = round(trabajo / n_meses, 3))
+}
