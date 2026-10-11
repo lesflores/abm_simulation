@@ -1,0 +1,194 @@
+# =====================================================================
+# cct_vecinos. Lo que hacen los vecinxs importa
+# Modelo 4 del curso de simulación basada en agentes
+# Punto de partida: el modelo 3 (estudiar, estudiar y trabajar,
+# o solo trabajar, con decisiones con ruido)
+# Novedades: comunidades rurales y urbanas, norma social de los vecinxs
+#            y temporada agrícola
+# =====================================================================
+
+# =========================
+# 0) Paquetes y semilla
+# =========================
+library(ABM)
+library(ggplot2)
+set.seed(1)
+
+# =========================
+# 1) Parámetros
+# =========================
+n_comunidades  <- 60      # Comunidades
+hogares_por_c  <- 50      # Hogares por comunidad
+N              <- n_comunidades * hogares_por_c   # 3,000 hogares
+Tmax           <- 48      # Meses (4 años)
+delay_prob_base <- 0.30
+lambda_cred     <- 0.30
+
+# --- Reglas del programa ---
+base_transfer_per_child <- 300
+max_children_paid       <- 2
+poverty_line            <- 4500
+bono_temporada          <- 0       # Pago EXTRA por hijx en comunidades rurales durante la temporada agrícola
+universal_rural         <- FALSE   # TRUE = todas las familias rurales son elegibles, sin importar su ingreso
+con_programa            <- TRUE    # FALSE = simular el mundo sin programa
+
+# --- Comunidades ---
+prop_rural      <- 0.40    # 40% de las comunidades son rurales
+theta_rural_ext <- 100     # En lo rural la escuela cuesta más (queda más lejos)
+meses_temporada <- 6:9     # Temporada agrícola: junio a septiembre
+salario_temporada <- 1.4   # En temporada, el trabajo rural paga 40% más
+
+# --- NUEVO: lxs vecinxs ---
+fuerza_vecinos <- 300      # Cuánto pesa que lxs vecinxs manden a sus hijxs a la escuela (omega)
+
+# --- La decisión (calibrada para que el trabajo infantil sea ~13%) ---
+valor_estudiar <- 790      # Más bajo que en la sesión 3: ahora parte del valor viene de los vecinos
+salario_12     <- 300
+tau            <- 120
+
+senal_publica <- TRUE
+
+# =====================================
+# 2) Crear comunidades y hogares
+# =====================================
+comunidad <- rep(1:n_comunidades, each = hogares_por_c)
+rural_com <- seq_len(n_comunidades) <= round(n_comunidades * prop_rural)   # Las primeras 24 son rurales
+
+elegible_v <- logical(N)   # Guardamos quién es elegible, para los resultados
+potencial_v <- logical(N)  # Quién SERÍA elegible si hubiera programa (para comparar con y sin programa)
+sim <- Simulation$new(N)
+for (i in 1:N) {
+  c_i      <- comunidad[i]
+  rural    <- rural_com[c_i]
+  theta    <- rnorm(1, mean = 300, sd = 80) + (if (rural) theta_rural_ext else 0)
+  n_hijos  <- sample(1:3, size = 1, prob = c(0.40, 0.25, 0.10))
+  Y_hogar  <- rlnorm(1, meanlog = log(4000) - (if (rural) 0.3 else 0), sdlog = 0.5)   # En lo rural se gana menos
+  potencial <- Y_hogar < poverty_line || (universal_rural && rural)
+  elegible  <- con_programa && potencial
+  elegible_v[i] <- elegible; potencial_v[i] <- potencial
+  edad     <- sample(12:17, size = 1)
+  salario  <- salario_12 * exp(0.12 * (edad - 12))
+  sim$setState(i, list("E", theta = theta, cred = 1 - delay_prob_base, n_hijos = n_hijos,
+                       elegible = elegible, edad = edad, salario = salario,
+                       comunidad = c_i, rural = rural))
+}
+
+# Lo que hizo cada hogar el mes pasado (para calcular lo que ven los vecinos)
+estado_prev <- rep("E", N)
+registro <- list()   # Aquí se guarda lo que eligió cada hogar cada mes
+pagos_mes <- numeric(Tmax + 1)
+
+sim$addLogger(newCounter("E", "E"))
+sim$addLogger(newCounter("ET", "ET"))
+sim$addLogger(newCounter("T", "T"))
+
+# =========================================================
+# 3) Regla mensual
+# =========================================================
+tick_handler <- function(time, sim, agent) {
+  mes_cal <- (time %% 12) + 1
+  en_temporada <- mes_cal %in% meses_temporada
+  
+  # NUEVO: lo que ve cada hogar en su comunidad = proporción que solo estudió el mes pasado
+  vecinos <- tapply(estado_prev == "E", comunidad, mean)
+  
+  nuevo <- character(N); pagado <- 0
+  for (i in 1:N) {
+    ai <- getAgent(sim, i)
+    st <- getState(ai)
+    
+    # Beca (como en la sesión 3) + bono de temporada en lo rural
+    hijos_cub    <- min(st$n_hijos, max_children_paid)
+    extra_temp   <- if (st$rural && en_temporada) bono_temporada else 0
+    transfer_eff <- if (st$elegible) (base_transfer_per_child + extra_temp) * hijos_cub else 0
+    beca         <- transfer_eff * st$cred
+    
+    # Salario: en temporada agrícola, el trabajo rural paga más
+    salario <- st$salario * (if (st$rural && en_temporada) salario_temporada else 1)
+    
+    # NUEVO: la norma de los vecinos suma puntos a estudiar
+    norma <- fuerza_vecinos * vecinos[[st$comunidad]]
+    
+    U_E  <- beca + valor_estudiar     + norma     - st$theta
+    U_ET <- beca + valor_estudiar / 2 + norma / 2 + salario / 2 - st$theta
+    U_T  <- salario
+    
+    U <- c(E = U_E, ET = U_ET, T = U_T)
+    prob <- exp((U - max(U)) / tau); prob <- prob / sum(prob)
+    new_state <- sample(c("E", "ET", "T"), size = 1, prob = prob)
+    
+    cobra <- st$elegible && new_state != "T"
+    if (cobra) {
+      senal  <- as.numeric(runif(1) > delay_prob_base)
+      pagado <- pagado + transfer_eff
+    } else if (senal_publica) {
+      senal <- 1 - delay_prob_base
+    } else {
+      senal <- 0
+    }
+    cred_new <- (1 - lambda_cred) * st$cred + lambda_cred * senal
+    
+    setState(ai, list(new_state, theta = st$theta, cred = cred_new, n_hijos = st$n_hijos,
+                      elegible = st$elegible, edad = st$edad, salario = st$salario,
+                      comunidad = st$comunidad, rural = st$rural))
+    nuevo[i] <- new_state
+  }
+  estado_prev <<- nuevo
+  pagos_mes[time + 1] <<- pagado / N
+  registro[[time + 1]] <<- data.frame(mes = time, comunidad = comunidad, rural = rural_com[comunidad],
+                                      elegible = elegible_v, potencial = potencial_v, estado = nuevo)
+  if (time < Tmax) schedule(agent, newEvent(time + 1, tick_handler))
+}
+
+# ==============================
+# 4) Ejecutar
+# ==============================
+schedule(sim$get, newEvent(0, tick_handler))
+res <- sim$run(0:Tmax)
+registro <- do.call(rbind, registro)
+
+# ==============================
+# 5) Resultados (promedio de los meses 24 a 47: dos años completos, con dos temporadas)
+# ==============================
+escenario <- paste0("vecinos", fuerza_vecinos, "_bonotemp", bono_temporada,
+                    if (universal_rural) "_univrural" else "", if (!con_programa) "_sinprograma" else "")
+r <- registro[registro$mes >= 24, ]
+r$trabajo <- r$estado != "E"
+resumen <- data.frame(
+  escenario         = escenario,
+  trabajo_infantil  = round(mean(r$trabajo), 3),
+  rural             = round(mean(r$trabajo[r$rural]), 3),
+  urbano            = round(mean(r$trabajo[!r$rural]), 3),
+  no_elegibles      = round(mean(r$trabajo[!r$potencial]), 3),   # Hogares que nunca reciben beca
+  costo_por_hogar   = round(mean(pagos_mes[25:Tmax]))   # meses 24 a 47
+)
+print(resumen)
+write.csv(resumen, paste0("resumen_", escenario, ".csv"), row.names = FALSE)
+
+# Trabajo infantil por mes, rural y urbano (para ver la temporada agrícola)
+por_mes <- aggregate(trabajo ~ mes + rural, data = transform(registro, trabajo = estado != "E"), FUN = mean)
+por_mes$zona <- ifelse(por_mes$rural, "Rural", "Urbano")
+
+p <- ggplot(por_mes, aes(x = mes, y = trabajo, colour = zona)) +
+  annotate("rect", xmin = c(5, 17, 29, 41) - 0.5, xmax = c(8, 20, 32, 44) + 0.5, ymin = -Inf, ymax = Inf, alpha = 0.12, fill = "orange") +
+  geom_line(linewidth = 1.2) +
+  scale_colour_manual(values = c("Rural" = "firebrick", "Urbano" = "steelblue")) +
+  coord_cartesian(ylim = c(0, 0.5)) +
+  labs(title = "Trabajo infantil por mes", subtitle = paste(escenario, "· en naranja, la temporada agrícola"),
+       x = "Mes", y = "Proporción en trabajo infantil", colour = NULL) +
+  theme_minimal(base_size = 14)
+p
+ggsave(paste0("trabajo_por_mes_", escenario, ".png"), plot = p, width = 8, height = 5, dpi = 300)
+
+# Mapa de comunidades: trabajo infantil promedio de cada una
+por_com <- aggregate(trabajo ~ comunidad + rural, data = r, FUN = mean)
+por_com$fila <- (por_com$comunidad - 1) %/% 10; por_com$col <- (por_com$comunidad - 1) %% 10
+p2 <- ggplot(por_com, aes(x = col, y = -fila, fill = trabajo)) +
+  geom_tile(colour = "white", linewidth = 1) +
+  geom_text(aes(label = ifelse(rural, "R", "")), colour = "white", size = 4) +
+  scale_fill_gradient(low = "gold", high = "firebrick", limits = c(0, 0.4), labels = scales::percent) +
+  coord_equal() +
+  labs(title = "Trabajo infantil por comunidad", subtitle = "R = comunidad rural", fill = "Trabajo\ninfantil") +
+  theme_void(base_size = 14)
+p2
+ggsave(paste0("mapa_comunidades_", escenario, ".png"), plot = p2, width = 7, height = 5, dpi = 300)
