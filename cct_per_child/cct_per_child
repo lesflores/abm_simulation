@@ -1,5 +1,6 @@
 # =====================================================================
 # cct_per_child. Elegibilidad por pobreza + transferencia por hijx
+# Modelo 2 del curso de simulación basada en agentes
 # Punto de partida: el modelo simple, ya corregido con señal pública
 # =====================================================================
 
@@ -28,9 +29,9 @@ ingreso_mediano  <- 4000   # Ingreso mensual mediano del hogar
 ingreso_desigual <- 0.5    # Dispersión del ingreso (más alto = más desigualdad)
 prob_hijos       <- c(0.25, 0.40, 0.25, 0.10)   # Probabilidad de tener 0, 1, 2 o 3 hijxs en edad escolar
 
-# --- Interruptor heredado de la sesión 1 ---
-senal_publica <- TRUE     # TRUE = corrección de la sesión 1 (quien no asiste recibe la señal pública)
-                          # FALSE = regla original (no asistir cuenta como retraso)
+# --- Interruptor heredado del modelo simple ---
+senal_publica <- TRUE     # TRUE = corrección del modelo simple (quien no asiste recibe la señal pública)
+# FALSE = regla original (no asistir cuenta como retraso)
 
 # =====================================
 # 2) Crear simulación y estado inicial
@@ -68,14 +69,14 @@ tick_handler <- function(time, sim, agent) {
     # --- Leer ---
     ai <- getAgent(sim, i)
     st <- getState(ai)
-
+    
     # --- Decidir ---
     # NUEVO: la transferencia depende de la elegibilidad y del número de hijxs (con tope)
     hijos_cubiertos <- min(st$n_hijos, max_children_paid)
     transfer_eff    <- if (st$elegible) base_transfer_per_child * hijos_cubiertos else 0
     benefit         <- transfer_eff * st$cred                      # Igual que en la sesión 1
     new_state       <- if (benefit >= st$theta) "A" else "N"
-
+    
     # --- Señal (igual que en la sesión 1) ---
     if (new_state == "A") {
       senal <- as.numeric(runif(1) > delay_prob_base)
@@ -85,11 +86,11 @@ tick_handler <- function(time, sim, agent) {
       senal <- 0
     }
     cred_new <- (1 - lambda_cred) * st$cred + lambda_cred * senal
-
+    
     # --- Escribir --- (todos los atributos, aunque no cambien)
     setState(ai, list(new_state, theta = st$theta, cred = cred_new,
                       n_hijos = st$n_hijos, Y_hogar = st$Y_hogar, elegible = st$elegible))
-
+    
     # Registro para el análisis por grupo
     hogares$n_hijos[i]      <<- st$n_hijos
     hogares$elegible[i]     <<- st$elegible
