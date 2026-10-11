@@ -1,187 +1,77 @@
-# Código AMB - CCT extendido 
+# cct_eleccion. Estudiar, estudiar y trabajar, o solo trabajar
 
-## Estructura
-**1. setState:** Crea cada agente y le asigna estado y atributos (lo que va a cargar durante toda la simulación). En el código: dentro del for (i in 1:N) se llama a:
+Modelo 3. Parte del modelo 2 (elegibilidad por pobreza y monto por hijx) y agrega tres cosas:
 
-`sim$setState(i, list(state0, theta=..., cred=..., n_hijos=..., ...))`
+1. **Tres opciones** cada mes: solo estudiar (E), estudiar y trabajar (ET) o solo trabajar (T).
+2. **El valor propio de estudiar**, para que las familias no elegibles también manden a sus hijxs a la escuela.
+3. **Decisiones con ruido:** la opción con más puntos es la más probable, pero no siempre gana.
 
-El primer elemento de la lista es el estado (“E”, “ET” o “T”). El resto son atributos (θ, credibilidad, zona, edad, etc.).
+Con los valores base, el modelo reproduce la tasa de trabajo infantil de **13.1%** que reporta la ENTI 2022 del INEGI.
 
-**2. addLogger:** Conecta sensores al simulador. Son funciones que, en cada tiempo, calculan y guardan métricas (conteos, medias, etc.). En el código:
+# 1) Parámetros nuevos
 
-`sim$addLogger(newCounter("E", "E"))
-sim$addLogger(newCounter("ET", "ET"))
-sim$addLogger(newCounter("T", "T"))`
+| Parámetro | Valor base | Qué significa |
+| --- | --- | --- |
+| `valor_estudiar` | 1000 | Cuánto valora la familia que su hijx estudie, en pesos al mes |
+| `salario_12` | 300 | Lo que aportaría trabajando un hijx de 12 años; crece con la edad hasta unos 550 a los 17 |
+| `tau` | 120 | Ruido de las decisiones: más alto, decisiones menos predecibles |
+| `bono_15_17` | 0 | Monto extra por hijx si el mayor tiene de 15 a 17 años |
+| `beca_solo_sin_trabajo` | FALSE | Si es TRUE, la beca solo se paga cuando el hijx estudia y no trabaja |
 
-Cada uno contará cuántos agentes están en ese estado en cada mes.
+Los demás parámetros (monto, tope, línea de pobreza, retraso, aprendizaje y señal pública) son los del modelo 2. Todos los hogares tienen al menos un hijx en edad escolar, para evitar el problema del denominador del modelo 2.
 
-**Resultado:** cuando termina run, se obtiene un data frame `res` con columnas times, E, ET, T (etc..).
+# 2) Los puntos de cada opción
 
-**4. tick_handler:** Es la regla de actualización. Aquí se define cómo pasan las cosas del mes *t* al mes *t+1.* En el código:
+En pesos al mes:
 
-Se Recorren agentes `(for (i in 1:N)),` se lee estado/atributos `(getState),` se calcula utilidades `U_E, U_ET, U_T,` se elige el `new_state,` se actualiza `cred (EMA),` y se guarda con `setState(ai, list(new_state, ...)).`
+```r
+U_E  <- beca    + valor_estudiar                      - theta   # Solo estudia
+U_ET <- beca_ET + valor_estudiar / 2 + salario / 2    - theta   # Estudia y trabaja
+U_T  <-                                salario                  # Solo trabaja
+```
 
-Aquí ocurre la inteligencia del modelo (decisión E/ET/T + aprendizaje de credibilidad).
+- `beca` es lo que la familia espera recibir: monto × credibilidad, como en los modelos 1 y 2.
+- En ET la familia cobra la beca, porque el programa pide asistir, no dejar de trabajar. Con `beca_solo_sin_trabajo <- TRUE`, `beca_ET` vale 0.
+- `theta` es lo que le cuesta a la familia mandar a su hijx a la escuela.
 
-**Patrón mental:** *leer* - > *decidir* - > *escribir* para cada agente, en cada tick.
+# 3) Decisión con ruido (softmax)
 
-**5. scheduler:** Agenda eventos para que el motor llame `tick_handler` en los tiempos que se establezcan.
+```r
+prob <- exp((U - max(U)) / tau)
+prob <- prob / sum(prob)
+new_state <- sample(c("E", "ET", "T"), 1, prob = prob)
+```
 
-**6. run**: Corre el *event loop* desde el primer evento programado (el tick 0) hasta que ya no queden eventos (o se alcance Tmax). En el código:
+Con `tau` bajo casi siempre gana la opción con más puntos, como en los modelos 1 y 2. Con `tau` alto, las tres opciones se vuelven parecidas. En econometría esto se llama logit multinomial.
 
-`res <- sim$run(0:Tmax)`
+# 4) Resultados
 
-🚩 El resultado `res` es una serie temporal con lo que los `loggers` midieron en cada mes `(E, ET, T,` etc.). Luego se crean métricas derivadas como `attend, rate_E,` etc.
+Cada corrida imprime y guarda `resumen_*.csv` (promedio de los últimos 12 meses):
 
-# Propósito del modelo
+- `solo_estudia`, `estudia_y_trabaja`, `solo_trabaja`
+- `trabajo_infantil` = estudia y trabaja + solo trabaja
+- `costo_por_hogar`: lo que paga el programa al mes, dividido entre todos los hogares
 
-**Cómo los hogares deciden cada mes si:**
+También imprime la tabla por elegibilidad y guarda la gráfica `eleccion_*.png`.
 
-- Mandan a sus hijxs solo a la escuela (E),
+| Escenario | Cambio | Trabajo infantil | Costo |
+| --- | --- | --- | --- |
+| Sin programa | `base_transfer_per_child <- 0` | 17.9% | 0 |
+| **Base** | | **13.1%** | 258 |
+| Monto 450 | `base_transfer_per_child <- 450` | 12.6% | 390 |
+| Bono 15–17 | `bono_15_17 <- 200` | 12.5% | 347 |
+| Línea 5,500 | `poverty_line <- 5500` | 11.7% | 322 |
+| Beca solo sin trabajo | `beca_solo_sin_trabajo <- TRUE` | 8.9% | 255 |
+| Poco ruido | `tau <- 60` | 2.5% | 261 |
+| Mucho ruido | `tau <- 240` | 32.4% | 245 |
 
-- Mandan a la escuela y además trabajan (ET), o
+# 5) Calibración con datos reales
 
-- Solo trabajan (T),
-dependiendo de los incentivos del programa, los costos, los ingresos, la credibilidad y el contexto.
+Según la ENTI 2022 (INEGI), 13.1% de la población de 5 a 17 años realizaba trabajo infantil, y 3 de cada 10 de ellos no asistían a la escuela. Eso da aproximadamente 87% que solo estudia, 9% que estudia y trabaja y 4% que solo trabaja. `valor_estudiar`, `salario_12` y `tau` se ajustaron para acercarse a esos números: el modelo da 87%, 8% y 5%.
 
-# Qué representa cada componente
+# 6) Supuestos que conviene discutir
 
-## 1. Población
-
-- `N = 5000:` son 5000 hogares (cada uno con al menos un niño o niña en edad escolar).
-
-- Cada hogar es un **agente** que decide cada mes qué hacer **(E / ET / T).**
-
-## 2. Programa de Transferencias Condicionadas (CCT)
-
-- `base_transfer_per_child = 500:` el monto por hijx elegible si cumple la condición (asistir a la escuela).
-
-- `max_children_paid = 2:` si tienen más hijxs, solo 2 reciben el pago (como límite de apoyo).
-
-- `poverty_line = 4500:` solo hogares con ingreso menor a esta línea son elegibles.
-
-Es decir:
-
-El beneficio depende del número de hijxs, pero solo si son pobres y cumplen la asistencia.
-
-### hasta aquí: 
-
-| Categoría      | Parámetro                                                      | Sig                                 |
-| -------------- | -------------------------------------------------------------- | ----------------------------------- |
-| Escenario      | `N`, `Tmax`                                                    | Tamaño y duración                   |
-| Programa       | `base_transfer_per_child`, `max_children_paid`, `poverty_line` | Diseño de la transferencia          |
-| Comportamiento | `delay_prob_base`, `lambda_cred`                               | Credibilidad y cumplimiento         |
-| Socioeconómico | `beta_age`, `beta_school`, `cost_school`, `urban_penalty`      | Determinantes de salario y decisión |
-
-
-## 3. Características del hogar
-
-Cada hogar tiene atributos que afectan sus decisiones:
-
-- `n_hijos:` cantidad de hijxs (0 a 3).
-
-- `Y_hogar:` ingreso base del hogar (sin incluir la transferencia).
-
-- `elegible:` TRUE si está por debajo de la línea de pobreza.
-
-- `edad, grado, sexo, zona:` características del niño/niña mayor, que influyen en el salario potencial y el umbral (por ejemplo, zonas rurales enfrentan más barreras).
-
-- `theta:` umbral individual para decidir (qué tanto beneficio necesita para convencerse de asistir).
-
-- `cred:` credibilidad en el pago puntual (entre 0 y 1).
-
-## 4. Dinámica mensual
-
-Cada mes (tick):
-
-1. Calcula beneficios esperados:
-
-- Si el hogar es elegible, el pago depende de sus hijxs cubiertos `(base_transfer_per_child * hijos_cubiertos).`
-
-- Pero solo lo valora según su credibilidad `(st$cred),` o sea, si cree que el pago sí llegará.
-
-2. Calcula salario potencial `(w_child):`
-
-- Según la edad y grado (modelo tipo Mincer), un niño mayor o con más estudios gana más si trabaja.
-
-3. Evalúa tres opciones:
-
-- **E:** solo escuela - > gana la transferencia, paga el costo escolar.
-
-- **ET:** escuela + trabajo - > mitad de transferencia, mitad del salario, mitad del costo.
-
-- **T:** solo trabajo - > gana el salario completo.
-
-Cada hogar calcula una utilidad esperada (U_E, U_ET, U_T) y elige la mayor:
-
-`utilities <- c(E = U_E, ET = U_ET, T = U_T)
-new_state <- names(which.max(utilities))`
-
-4. Decide su nuevo estado (E, ET o T).
-
-5. Simula si el pago fue puntual (prob. 70%):
-
-`paid_on_time <- (new_state %in% c("E", "ET")) && (runif(1) > delay_prob_base)`
-
-6. Actualiza su credibilidad (aprendizaje EMA):
-   - Si el pago llegó, la credibilidad sube.
-   - Si se retrasó, baja.
-   - Este aprendizaje gradual se controla con lambda_cred.
-  
-# Qué produce el modelo
-
-Cada fila de res es un mes (t = 0, 1, 2, …, 36), y tiene:
-  
-| Columna  | Significado                                     |
-| -------- | ----------------------------------------------- |
-| `times`  | Mes de la simulación                            |
-| `E`      | Hogares con hijxs que solo estudian             |
-| `ET`     | Hogares con hijxs que estudian y trabajan       |
-| `T`      | Hogares con hijxs que solo trabajan             |
-| `attend` | % de hogares con hijxs escolarizados = (E+ET)/N |
-
-# Qué representa la gráfica
-
-Muestra la proporción de hogares con hijxs que estudian (E+ET) a lo largo de los meses.
-
-Interpreta así:
-
-- Si la línea sube - > más hogares eligen la escuela (mejor desempeño educativo).
-
-- Si baja - > más hogares abandonan la escuela o eligen solo trabajo.
-
-- Si se estabiliza - >  equilibrio del sistema (steady state).
-
-Es un modelo basado en agentes donde los hogares:
-
-- Aprenden y ajustan su confianza en el programa (credibilidad);
-
-- Deciden racionalmente entre educación y trabajo infantil según:
-
-    - montos de beca,
-    - ingresos,
-    - costos,
-    - credibilidad,
-    - y contexto rural/urbano.
-
-Se está reproduciendo, a nivel micro, cómo un programa de transferencias condicionadas puede modificar las tasas de escolarización y trabajo infantil bajo distintos escenarios socioeconómicos.
-
-# Qué usar real vs simulado 😵‍💫
-
-| Bloque                         | Variable en código                                           | ¿Real, estimado o simulado?                  | De dónde sacarlo / cómo                                                                                                                                                                                                                         |
-| ------------------------------ | --------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Población**                  | `N`                                                             | Simular (tamaño de muestra)                  | El paper usa encuestas reales para **calibrar** y luego simula; puedes elegir N.                                                                                                                                                          |
-| **Horizonte**                  | `Tmax`                                                          | Simular                                      | Decisión de diseño (meses).                                                                                                                                                                                                                                   |
-| **Reglas CCT**                 | `base_transfer_per_child`, `max_children_paid`, `poverty_line`  | **Real (política)**                          | **Reglas oficiales del programa** (p.ej. Bolsa Família/Prospera: monto por niñx, tope de hijxs, línea de pobreza).                                     |
-| **Elegibilidad**               | `elegible <- (Y_hogar < poverty_line)`                          | Estimar con datos reales                     | Con **ingresos del hogar** de la encuesta (PNAD/ENIGH/etc.), marcas elegibilidad conforme a la norma.                                                                                                                                                         |
-| **Ingreso del hogar**          | `Y_hogar`                                                       | **Real (encuesta)** o **simulado calibrado** | El paper usa **PNAD 2011** (ingresos declarados). Si no tienes microdatos, simula con una lognormal **calibrada** a medias/percentiles por estado/área.                                                                                                       |
-| **Niñez**                      | `edad`, `grado`, `sexo`                                         | **Real (encuesta)** o **simulado calibrado** | Encuestas reportan edad, sexo y asistencia/último grado; el paper usa justamente esas covariables.                                                                                                                                                            |
-| **Zona**                       | `zona` (urbana/rural)                                           | **Real (encuesta)**                          | PNAD etiqueta área; el paper presenta diferencias urbano/rural en decisiones E/ET/T.                                                                                                                                                                   |
-| **# de hijxs**                 | `n_hijos`                                                       | **Real (encuesta)** o simulado calibrado     | Tamaño/composición del hogar viene en encuesta; el paper trabaja con estructura real de hogares.                                                                                                                                                              |
-| **Salario potencial niño**     | `w_child` (tu Mincer)                                           | **Estimado con datos reales**                | El paper **estima** un modelo **Becker–Mincer** con PNAD: OLS de log-salario en función de edad, educación, sexo y variables locales (mediana estatal). Usa esos **coeficientes estimados** para predecir salarios.                                           |
-| **Probabilidades de decisión** | (en el código se usa utilidades U_E/U_ET/U_T y `which.max`)       | **Estimado con datos reales**                | El paper **estima un logit multinomial** para obtener **probabilidades** de E/ET/T a partir de covariables (edad, grado, sexo, zona, ingresos, monto del CCT). Se puede reemplazar la regla determinística por sampling según **p(E), p(ET), p(T)** del logit.  |
-| **Costos escolares**           | `cost_school`                                                   | Real o **calibrado**                         | Ideal: costo directo (transporte, materiales) de **encuesta de gastos**. Si no hay, calibrar para que tasas E/ET/T se parezcan a las observadas por edad y zona.                                                                                              |
-| **Credibilidad**               | `delay_prob_base`, `lambda_cred`, `cred0`                       | **Mixto**                                    | Retrasos de pago: si existe **dato administrativo** úsalo; si no, **supón** (p.ej., 10–30%). `lambda_cred` (aprendizaje) y `cred0` son **mecánica ABM** (no del paper): **calíbralos** para reproducir trayectoria de asistencia.                             |
-| **Umbral**                     | `theta` (Normal(300,80))                                        | **Simulado / calibrado**                     | Costo inobservable y calibra su media/desvío para reproducir niveles base de E/ET/T por edad/zona.                                                       |
-| **Penalidad rural**            | `urban_penalty`                                                 | Real (si hay distancias/costos) o calibrado  | El paper documenta brecha urbano/rural (más ET y T en rural). Se puede **elevar costos** o umbrales en rural para replicar esas diferencias.                                                                                                                    |
-| **Regla ET (tiempo)**          | (la parametrización) `school_share_ET`, `att_min`, `transfer_rule` | **Real (norma de asistencia)** + calibración | Si ET implica asistencia parcial, define si el pago es **proporcional** o **todo/nada** (umbral). Basado en reglas del programa.                                                                                           |
+- El valor de estudiar es igual para todas las familias.
+- El salario solo depende de la edad.
+- `tau` decide mucho del resultado y no se observa directamente, se calibra.
+- El modelo no incluye lo que costaría verificar que un hijx no trabaja.
