@@ -1,0 +1,98 @@
+# =====================================================================
+# Sesión 5 ¿Cuál de los tres mundos es el verdadero?
+# Experimentos, calibración y validación con el modelo 4
+# =====================================================================
+
+library(ggplot2)
+source("modelo_rapido.R")
+
+# =====================================================================
+# 0) Verificación: ¿la versión rápida da lo mismo que cct_vecinos?
+# =====================================================================
+# cct_vecinos calcula hogar por hogar con el paquete ABM.
+# simular() aplica las mismas reglas a todos a la vez.
+# Si son el mismo modelo, deben dar casi lo mismo. Comparar dos versiones
+# de un modelo se llama "docking".
+rapido <- simular(fuerza_vecinos = 300)
+mean(rapido$trabajo)   # cct_vecinos dio 0.128
+
+# =====================================================================
+# 1) Una corrida no es un resultado: réplicas
+# =====================================================================
+reps <- sapply(1:20, function(s) mean(simular(fuerza_vecinos = 300, semilla = s)$trabajo))
+media <- mean(reps)
+ic    <- media + c(-1.96, 1.96) * sd(reps) / sqrt(length(reps))
+cat("Trabajo infantil:", round(media, 3), "· IC 95%:", round(ic, 3), "\n")
+
+# =====================================================================
+# 2) Barrido: ¿cuánto sirve el programa según la fuerza de los vecinxs?
+# =====================================================================
+barrido <- expand.grid(fuerza = c(0, 150, 300, 450, 600), semilla = 1:10)
+barrido$efecto <- mapply(function(f, s) {
+  mean(simular(f, con_programa = FALSE, semilla = s)$trabajo) - mean(simular(f, semilla = s)$trabajo)
+}, barrido$fuerza, barrido$semilla)
+
+efecto <- aggregate(efecto ~ fuerza, data = barrido, FUN = mean)
+efecto
+
+ggplot(efecto, aes(x = fuerza, y = efecto)) +
+  geom_line(colour = "orange", linewidth = 1.3) + geom_point(colour = "orange", size = 3) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "¿Cuánto baja el trabajo infantil gracias al programa?",
+       subtitle = "Los cinco mundos reproducen el mismo presente (~13%)",
+       x = "Fuerza de los vecinxs", y = "Puntos que baja el trabajo infantil") +
+  theme_minimal(base_size = 14)
+
+# =====================================================================
+# 3) Los datos del piloto
+# =====================================================================
+# Como en Progresa (1997), se sortearon comunidades: la mitad recibió el programa
+# (tratada = TRUE) y la mitad no. El sorteo se hizo por separado entre
+# comunidades rurales y urbanas. Para cada hogar sabemos si es elegible
+# y qué proporción de meses del último año su hijx estuvo en trabajo infantil.
+piloto <- read.csv("piloto.csv")
+
+patrones <- function(d) {
+  ne <- !d$elegible; el <- d$elegible
+  c(directo  = mean(d$trabajo[el & !d$tratada]) - mean(d$trabajo[el & d$tratada]),   # en familias elegibles
+    contagio = mean(d$trabajo[ne & !d$tratada]) - mean(d$trabajo[ne & d$tratada]))   # en familias NO elegibles
+}
+observado <- patrones(piloto)
+round(observado, 3)
+
+# =====================================================================
+# 4) ¿Qué fuerza de vecinos reproduce el contagio del piloto?
+# =====================================================================
+# Simulamos el mismo piloto (mismas comunidades sorteadas) en cada mundo.
+asignacion <- tapply(piloto$tratada, piloto$comunidad, function(x) x[1])
+
+mundos <- expand.grid(fuerza = c(0, 150, 300, 450, 600), semilla = 1:10)
+sims <- t(mapply(function(f, s) patrones(simular(f, con_programa = asignacion, meses = 24, desde = 12, semilla = s)),
+                 mundos$fuerza, mundos$semilla))
+mundos <- cbind(mundos, sims)
+contagio_mundo <- aggregate(cbind(contagio, directo) ~ fuerza, data = mundos, FUN = mean)
+contagio_mundo$distancia <- abs(contagio_mundo$contagio - observado[["contagio"]])
+contagio_mundo
+
+ggplot(mundos, aes(x = factor(fuerza), y = contagio)) +
+  geom_jitter(width = 0.12, colour = "orange", size = 2) +
+  geom_hline(yintercept = observado[["contagio"]], linewidth = 1, linetype = "dashed") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Contagio en cada mundo (10 réplicas) y en el piloto (línea)",
+       x = "Fuerza de los vecinxs", y = "Contagio en familias no elegibles") +
+  theme_minimal(base_size = 14)
+
+mejor <- contagio_mundo$fuerza[which.min(contagio_mundo$distancia)]
+mejor
+
+# =====================================================================
+# 5) Validación: ¿reproduce un patrón que NO usamos para elegir?
+# =====================================================================
+# Elegimos la fuerza con el contagio. El efecto directo en familias elegibles
+# no lo usamos: si el modelo también lo reproduce, es una validación.
+c(predicho = contagio_mundo$directo[contagio_mundo$fuerza == mejor], observado = observado[["directo"]])
+
+# =====================================================================
+# 6) La respuesta: ¿cuánto sirve el programa?
+# =====================================================================
+efecto$efecto[efecto$fuerza == mejor]
