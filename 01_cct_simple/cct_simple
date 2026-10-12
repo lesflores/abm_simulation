@@ -21,9 +21,9 @@ delay_prob_base <- 0.30   # Probabilidad de que el pago llegue tarde (30%)
 lambda_cred     <- 0.30   # Velocidad de aprendizaje de la credibilidad (0 = lento, 1 = muy rápido)
 
 # Interruptores de la sesión
-senal_publica <- TRUE    # FALSE = regla original: no asistir cuenta como retraso (señal 0)
+senal_publica <- FALSE    # FALSE = regla original: no asistir cuenta como retraso (señal 0)
 # TRUE  = corrección: quien no asiste recibe la señal pública 1 - delay_prob_base
-con_trabajo   <- TRUE    # TRUE = 40% de los hogares tiene un hijo que trabaja y nunca asiste (ejercicio de tarea)
+con_trabajo   <- FALSE    # TRUE = 40% de los hogares tiene un hijo que trabaja y nunca asiste
 prop_trabajo  <- 0.40     # Proporción de hogares con hijx que trabaja (solo si con_trabajo = TRUE)
 
 # =====================================
