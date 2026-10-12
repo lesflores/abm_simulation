@@ -1,4 +1,4 @@
-# cct_simple · Umbral + credibilidad
+# cct_simple, Umbral + credibilidad
 
 Modelo mínimo de un programa de transferencias condicionadas (CCT) a la asistencia escolar. Cada hogar decide cada mes si manda a sus hijxs a la escuela comparando cuánto espera recibir del programa con su umbral personal. Lo que espera recibir depende de su credibilidad, es decir, de cuánto confía en que el pago llegará a tiempo, y esa credibilidad se aprende con la experiencia.
 
