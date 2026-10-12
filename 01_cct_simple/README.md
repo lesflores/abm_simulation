@@ -23,7 +23,7 @@ Es el modelo de la sesión 1. Sirve para aprender la estructura del paquete `ABM
 
 `lambda_cred = 0.30`: qué tan rápido se ajusta la credibilidad (0 = lento, 1 = muy rápido).
 
-**Interruptores:**
+**Interruptor:**
 
 `senal_publica = FALSE`: qué señal recibe un hogar que **no** asiste.
 - `FALSE` (regla original): su señal es 0, como si el pago hubiera llegado tarde.
@@ -49,7 +49,7 @@ Nota: en `setState(...)` el primer elemento de la lista siempre es el **estado**
 
 # 5) Dinámica mensual (el "handler" del tick)
 
-La función `tick_handler(time, sim, agent)` define qué pasa cada mes. Para cada hogar sigue el patrón **leer → decidir → escribir**.
+La función `tick_handler(time, sim, agent)` define qué pasa cada mes. Para cada hogar sigue el patrón **leer → decidir → señal → escribir**.
 
 **Leer.** `ai <- getAgent(sim, i)` da una referencia al agente i; `st <- getState(ai)` trae su ficha:
 
@@ -60,7 +60,7 @@ La función `tick_handler(time, sim, agent)` define qué pasa cada mes. Para cad
 **Decidir.**
 
 - **Beneficio esperado:** `benefit = transfer_amount * st$cred`. Es el monto nominal multiplicado por la probabilidad percibida de que el pago llegue a tiempo. Si la credibilidad es alta, el hogar espera más; si es baja, espera menos aunque el monto sea el mismo.
-- **Regla de decisión:** asiste si `benefit >= st$theta`. Si `trabaja` es `TRUE`, no asiste.
+- **Regla de decisión:** asiste si `benefit >= st$theta`.
 
 **Señal del mes.** Es lo que el hogar observa sobre la puntualidad del programa:
 
@@ -76,7 +76,7 @@ Da más peso a lo reciente y menos a lo pasado; el peso de los meses anteriores 
 
 `theta` no cambia: es un rasgo fijo del hogar en este modelo.
 
-**Escribir.** `setState(ai, list(new_state, theta = st$theta, cred = cred_new))`. `setState` reemplaza la ficha completa: si se omite un atributo, desaparece. Por eso se vuelven a escribir `theta` aunque no cambien.
+**Escribir.** `setState(ai, list(new_state, theta = st$theta, cred = cred_new))`. `setState` reemplaza la ficha completa: si se omite un atributo, desaparece. Por eso se vuelve a escribir `theta` aunque no cambie.
 
 **Re-agendar** para el próximo mes: `if (time < Tmax) schedule(agent, newEvent(time + 1, tick_handler))`. Esta línea es la que hace avanzar el reloj; sin ella, la simulación corre un solo mes.
 
@@ -88,13 +88,13 @@ Da más peso a lo reciente y menos a lo pasado; el peso de los meses anteriores 
 
 `res$attend <- res$A / N` calcula la proporción que asiste.
 
-El punto de `times = 0` es el **estado inicial**, antes de la primera decisión. Por eso la gráfica arranca casi en cero y salta en el mes 1.
+El punto de `times = 0` es el **estado inicial**, antes de la primera decisión. Por eso la gráfica arranca en cero y salta en el mes 1.
 
 # Qué está modelando
 
 - **Micro-regla:** cada hogar decide A/N comparando su beneficio esperado (`monto * cred`) con su umbral (`theta`).
 - **Aprendizaje:** la credibilidad se mueve según la experiencia reciente con el programa.
-- **Supuestos que conviene tener presentes:** el hogar no tiene un panoráma completo (solo mira la transferencia de este mes, no los beneficios futuros de estudiar); un pago tarde se trata como si no hubiera llegado; y el umbral reúne en un solo número, en pesos, costos que no son dinero (tiempo, transporte, trabajo infantil).
+- **Supuestos que conviene tener presentes:** el hogar no tiene un panorama completo (solo mira la transferencia de este mes, no los beneficios futuros de estudiar); un pago tarde se trata como si no hubiera llegado; y el umbral reúne en un solo número, en pesos, costos que no son dinero (tiempo, transporte, trabajo infantil).
 
 # Lectura de resultados
 
