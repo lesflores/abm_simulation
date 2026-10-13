@@ -25,8 +25,6 @@ Modelo per child. Parte del modelo simple ya corregido (con señal pública) y l
 - `Y_hogar`: ingreso mensual del hogar sin la transferencia.
 - `elegible`: `TRUE` si `Y_hogar < poverty_line`.
 
-Como en el modelo simple, `setState` reemplaza la ficha completa y los tres atributos se vuelven a escribir cada mes aunque no cambien.
-
 # 3) La nueva regla del beneficio
 
 ```r
