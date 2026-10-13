@@ -1,4 +1,4 @@
-# cct_per_child · Elegibilidad por pobreza + transferencia por hijx
+# cct_per_child. Elegibilidad por pobreza + transferencia por hijx
 
 Modelo per child. Parte del modelo simple ya corregido (con señal pública) y le agrega **heterogeneidad** y **reglas de política**: cada hogar tiene un número de hijxs y un ingreso, y el programa solo paga a los hogares bajo la línea de pobreza, por hijx y con un tope.
 
