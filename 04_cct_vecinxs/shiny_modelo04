@@ -1,0 +1,239 @@
+# =====================================================================
+# El efecto vecino. Sesión 4 (versión en Shiny)
+#
+# Cómo usarlo:
+#   1. Instala los paquetes una vez: install.packages(c("shiny", "bslib"))
+#   2. Abre este archivo en RStudio y presiona el botón "Run App".
+#
+# Es el mismo modelo de cct_vecinos, escrito de forma rápida (sin el paquete ABM)
+# para que responda al instante. Sus resultados difieren uno o dos puntos de
+# los de cct_vecinos.
+# =====================================================================
+
+library(shiny)
+library(bslib)
+
+# ---------------------------------------------------------------------
+# 1) Población fija: los mismos hogares en todas las corridas
+# ---------------------------------------------------------------------
+NC <- 60; PER <- 50; N <- NC * PER; TMAX <- 48; DESDE <- 24
+comunidad <- rep(1:NC, each = PER)
+rural_c   <- seq_len(NC) <= 24
+rural     <- rural_c[comunidad]
+
+set.seed(2026)
+hijos   <- sample(1:3, N, replace = TRUE, prob = c(0.40, 0.25, 0.10))
+ingreso <- rlnorm(N, log(4000) - 0.3 * rural, 0.5)
+theta   <- rnorm(N, 300, 80) + 100 * rural
+edad    <- sample(12:17, N, replace = TRUE)
+salario0 <- 300 * exp(0.12 * (edad - 12))
+
+# Valor de estudiar calibrado para cada fuerza de vecinos (el presente da ~13%)
+VALOR <- c(`0` = 1040, `150` = 920, `300` = 790, `450` = 660, `600` = 540)
+
+# ---------------------------------------------------------------------
+# 2) El modelo (mismas reglas que cct_vecinos, todas las familias a la vez)
+# ---------------------------------------------------------------------
+simular <- function(p) {
+  set.seed(7)
+  pobre    <- ingreso < 4500 | (p$univ & rural)          # sería elegible
+  elegible <- pobre & p$prog                              # recibe beca
+  cred <- rep(0.7, N); vecinos <- rep(0.87, NC)
+  frames <- matrix(0, TMAX, NC); serie_r <- serie_u <- numeric(TMAX)
+  acc <- c(total = 0, rural = 0, urbano = 0, noelig = 0, costo = 0)
+  k <- TMAX - DESDE
+  for (t in 0:(TMAX - 1)) {
+    temporada <- ((t %% 12) + 1) %in% 6:9
+    salario <- salario0 * ifelse(rural & temporada, 1.4, 1)
+    transf  <- ifelse(elegible, (p$monto + ifelse(rural & temporada, p$bono, 0)) * pmin(hijos, 2), 0)
+    beca    <- transf * cred
+    norma   <- p$omega * vecinos[comunidad]
+    V       <- VALOR[[as.character(p$omega)]]
+    U_E  <- beca + V     + norma     - theta
+    U_ET <- beca + V / 2 + norma / 2 + salario / 2 - theta
+    U_T  <- salario
+    m <- pmax(U_E, U_ET, U_T)
+    e_E <- exp((U_E - m) / 120); e_ET <- exp((U_ET - m) / 120); e_T <- exp((U_T - m) / 120)
+    u <- runif(N) * (e_E + e_ET + e_T)
+    estado <- ifelse(u < e_E, "E", ifelse(u < e_E + e_ET, "ET", "T"))
+    cobra <- elegible & estado != "T"
+    cred  <- 0.7 * cred + 0.3 * ifelse(cobra, as.numeric(runif(N) > 0.3), 0.7)
+    vecinos <- tapply(estado == "E", comunidad, mean)
+    ti <- estado != "E"
+    frames[t + 1, ] <- tapply(ti, comunidad, mean)
+    serie_r[t + 1] <- mean(ti[rural]); serie_u[t + 1] <- mean(ti[!rural])
+    if (t >= DESDE) acc <- acc + c(mean(ti), mean(ti[rural]), mean(ti[!rural]), mean(ti[!pobre]), sum(transf * cobra) / N) / k
+  }
+  list(acc = acc, frames = frames, promedio = colMeans(frames[(DESDE + 1):TMAX, ]),
+       serie_r = serie_r, serie_u = serie_u)
+}
+
+base_p   <- list(omega = 300, prog = TRUE, monto = 300, bono = 0, univ = FALSE)
+COSTO0   <- simular(base_p)$acc[["costo"]]
+PRESUP   <- COSTO0 + 40
+
+pct  <- function(x) paste0(format(round(100 * x, 1), nsmall = 1), "%")
+peso <- function(x) paste0("$", format(round(x), big.mark = ","))
+
+# Color de cada comunidad: verde (0%) → amarillo → rojo (40% o más)
+color_ti <- function(x) {
+  v <- pmin(1, x / 0.4)
+  a <- c(43, 179, 160); b <- c(242, 193, 78); c <- c(226, 83, 63)
+  rgb_v <- if (v < 0.5) a + (b - a) * v / 0.5 else b + (c - b) * (v - 0.5) / 0.5
+  sprintf("rgb(%d,%d,%d)", round(rgb_v[1]), round(rgb_v[2]), round(rgb_v[3]))
+}
+
+# ---------------------------------------------------------------------
+# 3) Interfaz
+# ---------------------------------------------------------------------
+tema <- bs_theme(bg = "#1A1226", fg = "#FFF2E6", primary = "#AA8CFF", secondary = "#2E2244",
+                 base_font = font_google("Atkinson Hyperlegible", local = FALSE),
+                 heading_font = font_google("Fraunces", local = FALSE))
+
+ui <- page_sidebar(
+  title = "El efecto vecino: lo que hacen las otras familias importa",
+  theme = tema,
+  fillable = FALSE,
+  sidebar = sidebar(
+    width = 330,
+    h5("¿Cuánto pesan lxs vecinxs?"),
+    radioButtons("omega", "Fuerza de lxs vecinxs", choices = c(0, 150, 300, 450, 600), selected = 300, inline = TRUE),
+    p(class = "small", "0 = cada familia decide sola. Con cualquier valor, el modelo se ajusta para que el presente se parezca al real (~13% de trabajo infantil)."),
+    hr(),
+    h5("Reglas del programa"),
+    checkboxInput("prog", "Hay programa", TRUE),
+    sliderInput("monto", "Monto por hijx", min = 0, max = 600, value = 300, step = 25, pre = "$"),
+    sliderInput("bono", "Bono de temporada (rural, junio a septiembre)", min = 0, max = 600, value = 0, step = 50, pre = "$"),
+    checkboxInput("univ", "Todas las familias rurales son elegibles", FALSE),
+    actionButton("reset", "Volver a la base", class = "btn-outline-primary")
+  ),
+
+  card(
+    card_header("Las comunidades"),
+    p(class = "small", "Cada cuadro es una comunidad de 50 hogares; las que tienen ● son rurales. El color es su trabajo infantil."),
+    uiOutput("mapa"),
+    sliderInput("mes", "Mes (0 = promedio de los años 3 y 4)", min = 0, max = TMAX, value = 0, step = 1, width = "100%",
+                animate = animationOptions(interval = 300))
+  ),
+  layout_columns(col_widths = c(6, 6),
+    card(card_header("Resultado (promedio de los años 3 y 4)"), uiOutput("resultado")),
+    card(card_header("Efecto del programa y contagio"), uiOutput("efecto"))
+  ),
+  card(card_header("Mes a mes: rural y urbano"), uiOutput("serie")),
+  card(
+    card_header("Diseños de mi equipo"),
+    layout_columns(col_widths = c(9, 3),
+      textInput("nombre", NULL, placeholder = "Nombre del diseño", width = "100%"),
+      actionButton("guardar", "Guardar diseño", class = "btn-primary")
+    ),
+    tableOutput("tabla"),
+    downloadButton("descargar", "Descargar tabla (CSV)")
+  ),
+  div(style = "text-align:center;font-size:.9rem;opacity:.85;padding:18px 0 8px",
+      "Curso de simulación basada en agentes · ",
+      a("github.com/lesflores/abm_simulation", href = "https://github.com/lesflores/abm_simulation", target = "_blank"))
+)
+
+# ---------------------------------------------------------------------
+# 4) Lo que pasa cuando alguien mueve un control
+# ---------------------------------------------------------------------
+server <- function(input, output, session) {
+
+  parametros <- reactive(list(omega = as.numeric(input$omega), prog = input$prog,
+                              monto = input$monto, bono = input$bono, univ = input$univ))
+  con <- reactive(simular(parametros()))
+  sin <- reactive(simular(modifyList(parametros(), list(prog = FALSE))))
+
+  output$mapa <- renderUI({
+    vals <- if (input$mes == 0) con()$promedio else con()$frames[input$mes, ]
+    temp <- input$mes > 0 && (((input$mes - 1) %% 12) + 1) %in% 6:9
+    cuadros <- lapply(1:NC, function(c) {
+      div(style = paste0("aspect-ratio:1.25;border-radius:8px;display:flex;align-items:center;justify-content:center;",
+                         "font-size:.78rem;font-weight:700;color:rgba(0,0,0,.6);position:relative;background:", color_ti(vals[c])),
+          if (rural_c[c]) span("●", style = "position:absolute;top:2px;left:5px;font-size:.6rem") else NULL,
+          paste0(round(100 * vals[c]), "%"))
+    })
+    tagList(
+      if (temp) div(style = "display:inline-block;background:#FFC846;color:#1A1226;font-weight:700;border-radius:999px;padding:2px 12px;margin-bottom:8px",
+                    "Temporada agrícola") else NULL,
+      div(style = "display:grid;grid-template-columns:repeat(10, 1fr);gap:6px", cuadros)
+    )
+  })
+
+  output$resultado <- renderUI({
+    a <- con()$acc
+    caja <- function(v, t) div(style = "background:#2E2244;border-radius:10px;padding:10px 12px",
+                               div(style = "font-size:1.6rem;font-weight:700", v), div(class = "small", t))
+    dentro <- a[["costo"]] <= PRESUP + 0.5
+    tagList(
+      div(style = "display:grid;grid-template-columns:1fr 1fr;gap:10px",
+          caja(pct(a[["total"]]), "trabajo infantil, todo el pueblo"), caja(pct(a[["rural"]]), "en comunidades rurales"),
+          caja(pct(a[["urbano"]]), "en comunidades urbanas"), caja(peso(a[["costo"]]), "costo al mes por hogar")),
+      p(style = "margin-top:12px", strong(paste0("Presupuesto: el costo actual (", peso(COSTO0), ") más $40 = ", peso(PRESUP))), br(),
+        span(if (dentro) "Dentro del presupuesto" else "Te pasaste del presupuesto",
+             style = paste0("font-weight:bold;color:", if (dentro) "#28BEAF" else "#FF6E5A")))
+    )
+  })
+
+  output$efecto <- renderUI({
+    if (!input$prog) return(p("Activa el programa para comparar con el mismo pueblo sin programa."))
+    a <- con()$acc; s <- sin()$acc
+    d1 <- s[["total"]] - a[["total"]]; d2 <- s[["noelig"]] - a[["noelig"]]
+    tagList(
+      h6("Efecto del programa"),
+      div(style = "font-size:2.2rem;font-weight:700", paste0("−", format(round(100 * d1, 1), nsmall = 1), " pts")),
+      p(class = "small", paste0("Sin programa, el trabajo infantil sería ", pct(s[["total"]]), "; con programa, ", pct(a[["total"]]), ".")),
+      h6("Contagio: familias que nunca reciben beca"),
+      div(style = "font-size:2.2rem;font-weight:700;color:#28BEAF", paste0(if (d2 >= 0.0005) "−" else "", format(round(100 * abs(d2), 1), nsmall = 1), " pts")),
+      p(class = "small", paste0(pct(s[["noelig"]]), " sin programa, ", pct(a[["noelig"]]), " con programa."))
+    )
+  })
+
+  output$serie <- renderUI({
+    r <- con()$serie_r; u <- con()$serie_u
+    W <- 600; H <- 170; pad <- 24; maxY <- 0.5
+    x <- function(t) pad + (W - 2 * pad) * (t - 1) / (TMAX - 1)
+    y <- function(v) H - pad - (H - 2 * pad) * pmin(v, maxY) / maxY
+    franjas <- paste0(sapply(0:3, function(a) sprintf('<rect x="%.1f" y="%d" width="%.1f" height="%d" fill="#FFC846" opacity=".15"/>',
+                                                      x(a * 12 + 6), pad, x(a * 12 + 9) - x(a * 12 + 6), H - 2 * pad)), collapse = "")
+    rejilla <- paste0(sapply(c(0, 0.25, 0.5), function(v) sprintf('<line x1="%d" x2="%d" y1="%.1f" y2="%.1f" stroke="#3D3158"/><text x="2" y="%.1f" font-size="11" fill="#B9AACC">%d%%</text>',
+                                                                  pad, W - pad, y(v), y(v), y(v) + 4, round(v * 100))), collapse = "")
+    linea <- function(s, col) sprintf('<path d="%s" fill="none" stroke="%s" stroke-width="2.5"/>',
+                                      paste0(ifelse(seq_along(s) == 1, "M", "L"), sprintf("%.1f %.1f", x(seq_along(s)), y(s)), collapse = " "), col)
+    meses <- paste0(sapply(c(1, 12, 24, 36, 48), function(m) sprintf('<text x="%.1f" y="%d" font-size="11" fill="#B9AACC" text-anchor="middle">%d</text>', x(m), H - 4, m)), collapse = "")
+    svg <- sprintf('<svg viewBox="0 0 %d %d" style="width:100%%;height:auto" role="img" aria-label="Trabajo infantil por mes">%s%s%s%s%s</svg>',
+                   W, H, franjas, rejilla, linea(r, "#FF6E5A"), linea(u, "#AA8CFF"), meses)
+    tagList(
+      p(class = "small", span("■ Rural", style = "color:#FF6E5A;margin-right:14px"), span("■ Urbano", style = "color:#AA8CFF;margin-right:14px"),
+        span("■ Temporada agrícola", style = "color:#FFC846")),
+      HTML(svg)
+    )
+  })
+
+  observeEvent(input$reset, {
+    updateRadioButtons(session, "omega", selected = 300); updateCheckboxInput(session, "prog", value = TRUE)
+    updateSliderInput(session, "monto", value = 300); updateSliderInput(session, "bono", value = 0)
+    updateCheckboxInput(session, "univ", value = FALSE); updateSliderInput(session, "mes", value = 0)
+  })
+
+  disenos <- reactiveVal(data.frame())
+  observeEvent(input$guardar, {
+    p <- parametros(); a <- con()$acc
+    fila <- data.frame(
+      `Diseño` = if (nzchar(input$nombre)) input$nombre else paste("Diseño", nrow(disenos()) + 1),
+      `Trabajo infantil` = pct(a[["total"]]), Rural = pct(a[["rural"]]), Costo = peso(a[["costo"]]),
+      `Dentro del presupuesto` = if (a[["costo"]] <= PRESUP + 0.5) "Sí" else "No",
+      Reglas = paste0("Vecinxs ", p$omega,
+                      if (p$prog) paste0(", monto ", peso(p$monto), if (p$bono > 0) paste0(", bono temporada ", peso(p$bono)) else "",
+                                         if (p$univ) ", rurales todas elegibles" else "") else ", sin programa"),
+      check.names = FALSE)
+    disenos(rbind(disenos(), fila))
+    updateTextInput(session, "nombre", value = "")
+  })
+  output$tabla <- renderTable(disenos())
+  output$descargar <- downloadHandler(
+    filename = function() "disenos_efecto_vecino.csv",
+    content  = function(file) write.csv(disenos(), file, row.names = FALSE))
+}
+
+shinyApp(ui, server)
