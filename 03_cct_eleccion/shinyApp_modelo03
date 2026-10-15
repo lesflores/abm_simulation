@@ -1,0 +1,265 @@
+# =====================================================================
+# Laboratorio de políticaS (versión en Shiny)
+# ¿Cómo bajar el trabajo infantil con el mismo presupuesto?
+#
+# Cómo usarlo:
+#   1. Instala los paquetes una vez: install.packages(c("shiny", "bslib"))
+#   2. Abre este archivo en RStudio y presiona el botón "Run App".
+#
+# Es el mismo modelo de cct_eleccion, escrito de forma rápida (sin el paquete ABM)
+# para que responda al instante. Con 3,000 hogares, sus resultados difieren
+# uno o dos puntos de los de cct_eleccion.
+# =====================================================================
+
+# install.packages(c("shiny", "bslib"))
+library(shiny)
+library(bslib)
+
+# ---------------------------------------------------------------------
+# 1) Población fija: los mismos hogares en todas las corridas
+# ---------------------------------------------------------------------
+N    <- 3000   # hogares
+Tmax <- 36     # meses
+SHOW <- 400    # hogares que se dibujan en el pueblo
+
+set.seed(2026)
+poblacion <- data.frame(
+  hijos = sample(1:3, N, replace = TRUE, prob = c(0.40, 0.25, 0.10)),
+  Y     = rlnorm(N, meanlog = log(4000), sdlog = 0.5),
+  theta = rnorm(N, mean = 300, sd = 80),
+  edad  = sample(12:17, N, replace = TRUE)
+)
+
+colores <- c(E = "#28BEAF", ET = "#FFC846", T = "#FF6E5A")
+nombres <- c(E = "Solo estudia", ET = "Estudia y trabaja", T = "Solo trabaja")
+
+# ---------------------------------------------------------------------
+# 2) El modelo (igual que cct_eleccion, pero con todos los hogares a la vez)
+# ---------------------------------------------------------------------
+simular <- function(p) {
+  set.seed(7)
+  pob    <- poblacion
+  eleg   <- pob$Y < p$linea
+  monto  <- p$monto + ifelse(pob$edad >= 15, p$bono, 0)
+  transf <- ifelse(eleg, monto * pmin(pob$hijos, p$tope), 0)
+  salario <- p$salario * exp(0.12 * (pob$edad - 12))
+  cred   <- rep(1 - p$delay, N)
+  
+  estados <- matrix("", nrow = Tmax + 1, ncol = SHOW)
+  shares  <- matrix(0, nrow = Tmax + 1, ncol = 3, dimnames = list(NULL, c("E", "ET", "T")))
+  pagado  <- numeric(Tmax + 1)
+  
+  for (t in 0:Tmax) {
+    beca    <- transf * cred
+    beca_ET <- if (p$soloE) 0 else beca
+    U_E  <- beca    + p$valor                       - pob$theta
+    U_ET <- beca_ET + p$valor / 2 + salario / 2     - pob$theta
+    U_T  <-                         salario
+    m    <- pmax(U_E, U_ET, U_T)
+    e_E  <- exp((U_E - m) / p$tau); e_ET <- exp((U_ET - m) / p$tau); e_T <- exp((U_T - m) / p$tau)
+    s    <- e_E + e_ET + e_T
+    u    <- runif(N)
+    est  <- ifelse(u < e_E / s, "E", ifelse(u < (e_E + e_ET) / s, "ET", "T"))
+    
+    cobra <- eleg & (est == "E" | (est == "ET" & !p$soloE))
+    senal <- ifelse(cobra, as.numeric(runif(N) > p$delay), 1 - p$delay)
+    cred  <- 0.7 * cred + 0.3 * senal
+    
+    estados[t + 1, ] <- est[1:SHOW]
+    shares[t + 1, ]  <- c(mean(est == "E"), mean(est == "ET"), mean(est == "T"))
+    pagado[t + 1]    <- sum(transf * cobra) / N
+  }
+  ult <- 26:37   # meses 25 a 36
+  list(shares = colMeans(shares[ult, ]), costo = mean(pagado[ult]),
+       estados = estados, elegibles = mean(eleg))
+}
+
+base_p <- list(monto = 300, tope = 2, linea = 4500, bono = 0, soloE = FALSE,
+               delay = 0.30, valor = 1000, salario = 300, tau = 120)
+BASE    <- simular(base_p)
+SIN     <- simular(modifyList(base_p, list(monto = 0)))
+PRESUP  <- ceiling(BASE$costo)
+
+pct  <- function(x) paste0(format(round(100 * x, 1), nsmall = 1), "%")
+peso <- function(x) paste0("$", format(round(x), big.mark = ","))
+
+# ---------------------------------------------------------------------
+# 3) Interfaz
+# ---------------------------------------------------------------------
+tema <- bs_theme(bg = "#1A1226", fg = "#FFF2E6", primary = "#AA8CFF", secondary = "#2E2244",
+                 base_font = font_google("Atkinson Hyperlegible", local = FALSE),
+                 heading_font = font_google("Fraunces", local = FALSE))
+
+ui <- page_sidebar(
+  title = "Laboratorio de política: menos trabajo infantil con el mismo presupuesto",
+  theme = tema,
+  fillable = FALSE,
+  sidebar = sidebar(
+    width = 330,
+    h5("Reglas del programa"),
+    sliderInput("monto", "Monto por hijx", min = 0, max = 600, value = 300, step = 25, pre = "$"),
+    sliderInput("tope", "Hijxs pagados como máximo", min = 1, max = 3, value = 2, step = 1),
+    sliderInput("linea", "Línea de pobreza", min = 2500, max = 7000, value = 4500, step = 250, pre = "$"),
+    sliderInput("bono", "Bono extra si su hijx tiene 15 a 17 años", min = 0, max = 400, value = 0, step = 25, pre = "$"),
+    checkboxInput("soloE", "Pagar la beca solo si su hijx no trabaja", FALSE),
+    sliderInput("delay", "Pagos que llegan tarde (%)", min = 0, max = 50, value = 30, step = 5),
+    accordion(open = FALSE,
+              accordion_panel("Supuestos de la población",
+                              sliderInput("valor", "Cuánto valora la familia que su hijx estudie", min = 400, max = 1600, value = 1000, step = 50, pre = "$"),
+                              sliderInput("salario", "Lo que aporta un hijx trabajando a los 12 años", min = 100, max = 700, value = 300, step = 25, pre = "$"),
+                              sliderInput("tau", "Ruido en las decisiones (tau)", min = 20, max = 300, value = 120, step = 10)
+              )
+    ),
+    actionButton("reset", "Volver a la base", class = "btn-outline-primary")
+  ),
+  
+  layout_columns(col_widths = c(7, 5),
+                 card(
+                   card_header("El pueblo: 400 hogares"),
+                   uiOutput("pueblo"),
+                   sliderInput("mes", "Mes", min = 0, max = Tmax, value = Tmax, step = 1, width = "100%",
+                               animate = animationOptions(interval = 250))
+                 ),
+                 card(
+                   card_header("Resultado"),
+                   uiOutput("resultado"),
+                   uiOutput("barras"),
+                   uiOutput("presupuesto")
+                 )
+  ),
+  layout_columns(col_widths = c(5, 7),
+                 card(
+                   card_header("Una familia por dentro"),
+                   sliderInput("f_edad", "Edad del hijx mayor", min = 12, max = 17, value = 15, step = 1),
+                   sliderInput("f_hijos", "Hijxs en la escuela", min = 1, max = 3, value = 1, step = 1),
+                   sliderInput("f_theta", "Lo que le cuesta mandar a su hijx a la escuela (θ)", min = 100, max = 500, value = 300, step = 10, pre = "$"),
+                   checkboxInput("f_eleg", "Es elegible (gana menos que la línea)", TRUE)
+                 ),
+                 card(
+                   card_header("Puntos y probabilidades de esa familia"),
+                   uiOutput("familia_texto"),
+                   uiOutput("familia"),
+                   p(class = "small", "La opción con más puntos es la más probable, pero no siempre gana. Sube el ruido y mira cómo se reparten las probabilidades.")
+                 )
+  ),
+  card(
+    card_header("Diseños de mi equipo"),
+    layout_columns(col_widths = c(9, 3),
+                   textInput("nombre", NULL, placeholder = "Nombre del diseño, por ejemplo: Equipo 2, beca sin trabajo", width = "100%"),
+                   actionButton("guardar", "Guardar diseño", class = "btn-primary")
+    ),
+    tableOutput("tabla"),
+    downloadButton("descargar", "Descargar tabla (CSV)")
+  ),
+  div(style = "text-align:center;font-size:.9rem;opacity:.85;padding:18px 0 8px",
+      "Curso de simulación basada en agentes - ",
+      a("github.com/lesflores/abm_simulation", href = "https://github.com/lesflores/abm_simulation", target = "_blank"))
+)
+
+# ---------------------------------------------------------------------
+# 4) Lo que pasa cuando alguien mueve un control
+# ---------------------------------------------------------------------
+server <- function(input, output, session) {
+  
+  parametros <- reactive(list(
+    monto = input$monto, tope = input$tope, linea = input$linea, bono = input$bono,
+    soloE = input$soloE, delay = input$delay / 100, valor = input$valor,
+    salario = input$salario, tau = input$tau))
+  
+  r <- reactive(simular(parametros()))
+  
+  output$pueblo <- renderUI({
+    est <- r()$estados[input$mes + 1, ]
+    puntos <- lapply(est, function(e) span(style = paste0("aspect-ratio:1;border-radius:50%;background:", colores[[e]])))
+    leyenda <- lapply(names(nombres), function(op)
+      span(style = "margin-right:14px", span(style = paste0("display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;background:", colores[[op]])), nombres[[op]]))
+    tagList(
+      div(style = "display:grid;grid-template-columns:repeat(20, 1fr);gap:4px;max-width:400px;margin:0 auto", puntos),
+      div(style = "text-align:center;margin-top:10px;font-size:.9rem", leyenda)
+    )
+  })
+  
+  output$resultado <- renderUI({
+    s  <- r()$shares; ti <- s[["ET"]] + s[["T"]]
+    tb <- BASE$shares[["ET"]] + BASE$shares[["T"]]; ts <- SIN$shares[["ET"]] + SIN$shares[["T"]]
+    tagList(
+      h1(pct(ti), style = "font-size:3rem;margin:0"),
+      p(strong("en trabajo infantil (estudia y trabaja + solo trabaja)")),
+      p(class = "small", paste0("Programa actual: ", pct(tb), " · Sin programa: ", pct(ts),
+                                " · Elegibles: ", pct(r()$elegibles))),
+      p(paste0("Solo estudia ", pct(s[["E"]]), " · Estudia y trabaja ", pct(s[["ET"]]), " · Solo trabaja ", pct(s[["T"]])))
+    )
+  })
+  
+  output$barras <- renderUI({
+    s <- r()$shares
+    tramo <- function(op) div(style = paste0("width:", round(100 * s[[op]], 2), "%;background:", colores[[op]], ";height:100%"))
+    div(style = "display:flex;height:28px;border-radius:8px;overflow:hidden;margin:6px 0 14px",
+        tramo("E"), tramo("ET"), tramo("T"))
+  })
+  
+  output$presupuesto <- renderUI({
+    c0 <- r()$costo; dentro <- c0 <= PRESUP + 0.5
+    p(strong(paste0("Costo: ", peso(c0), " al mes por hogar · Presupuesto: ", peso(PRESUP))), br(),
+      span(if (dentro) "Dentro del presupuesto" else "Te pasaste del presupuesto",
+           style = paste0("color:", if (dentro) colores[["E"]] else colores[["T"]], ";font-weight:bold")))
+  })
+  
+  familia <- reactive({
+    p <- parametros()
+    transf <- if (input$f_eleg) (p$monto + if (input$f_edad >= 15) p$bono else 0) * min(input$f_hijos, p$tope) else 0
+    beca <- transf * (1 - p$delay); w <- p$salario * exp(0.12 * (input$f_edad - 12))
+    U <- c(E = beca + p$valor - input$f_theta,
+           ET = (if (p$soloE) 0 else beca) + p$valor / 2 + w / 2 - input$f_theta,
+           T = w)
+    pr <- exp((U - max(U)) / p$tau); pr <- pr / sum(pr)
+    list(beca = beca, w = w, U = U, pr = pr)
+  })
+  
+  output$familia_texto <- renderUI({
+    f <- familia()
+    p(class = "small", paste0("Espera de beca: ", peso(f$beca), " · Aporte si trabaja: ", peso(f$w)))
+  })
+  
+  output$familia <- renderUI({
+    f <- familia()
+    filas <- lapply(names(nombres), function(op) {
+      div(style = "display:grid;grid-template-columns:9rem 1fr 7.5rem;gap:10px;align-items:center;margin-bottom:10px",
+          span(nombres[[op]]),
+          div(style = "height:18px;background:#2E2244;border-radius:6px;overflow:hidden",
+              div(style = paste0("height:100%;width:", round(100 * f$pr[[op]], 1), "%;background:", colores[[op]]))),
+          span(paste0(round(100 * f$pr[[op]]), "% (", round(f$U[[op]]), " pts)")))
+    })
+    div(style = "margin-top:8px", filas)
+  })
+  
+  observeEvent(input$reset, {
+    updateSliderInput(session, "monto", value = 300); updateSliderInput(session, "tope", value = 2)
+    updateSliderInput(session, "linea", value = 4500); updateSliderInput(session, "bono", value = 0)
+    updateCheckboxInput(session, "soloE", value = FALSE); updateSliderInput(session, "delay", value = 30)
+    updateSliderInput(session, "valor", value = 1000); updateSliderInput(session, "salario", value = 300)
+    updateSliderInput(session, "tau", value = 120)
+  })
+  
+  disenos <- reactiveVal(data.frame())
+  observeEvent(input$guardar, {
+    p <- parametros(); s <- r()$shares
+    fila <- data.frame(
+      `Diseño` = if (nzchar(input$nombre)) input$nombre else paste("Diseño", nrow(disenos()) + 1),
+      `Trabajo infantil` = pct(s[["ET"]] + s[["T"]]),
+      Costo = peso(r()$costo),
+      `Dentro del presupuesto` = if (r()$costo <= PRESUP + 0.5) "Sí" else "No",
+      Reglas = paste0("Monto ", peso(p$monto), ", tope ", p$tope, ", línea ", peso(p$linea),
+                      if (p$bono > 0) paste0(", bono 15-17 ", peso(p$bono)) else "",
+                      if (p$soloE) ", solo sin trabajo" else "", ", retraso ", p$delay * 100, "%"),
+      check.names = FALSE)
+    disenos(rbind(disenos(), fila))
+    updateTextInput(session, "nombre", value = "")
+  })
+  output$tabla <- renderTable(disenos())
+  output$descargar <- downloadHandler(
+    filename = function() "disenos_hackaton.csv",
+    content  = function(file) write.csv(disenos(), file, row.names = FALSE))
+}
+
+shinyApp(ui, server)
